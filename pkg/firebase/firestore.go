@@ -142,42 +142,58 @@ func (c *Client) ListCollections() ([]Collection, error) {
 
 	url := fmt.Sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents:listCollectionIds", c.currentProject)
 
-	req, err := http.NewRequest("POST", url, strings.NewReader("{}"))
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
-	}
-
-	var result struct {
-		CollectionIds []string `json:"collectionIds"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
-	}
-
 	var collections []Collection
-	for _, id := range result.CollectionIds {
-		collections = append(collections, Collection{
-			Name: id,
-			Path: id,
-		})
+	pageToken := ""
+
+	for {
+		reqBody := map[string]any{"pageSize": 300}
+		if pageToken != "" {
+			reqBody["pageToken"] = pageToken
+		}
+		reqData, _ := json.Marshal(reqBody)
+
+		req, err := http.NewRequest("POST", url, strings.NewReader(string(reqData)))
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		if resp.StatusCode != 200 {
+			return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+		}
+
+		var result struct {
+			CollectionIds []string `json:"collectionIds"`
+			NextPageToken string   `json:"nextPageToken"`
+		}
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, err
+		}
+
+		for _, id := range result.CollectionIds {
+			collections = append(collections, Collection{
+				Name: id,
+				Path: id,
+			})
+		}
+
+		if result.NextPageToken == "" {
+			break
+		}
+		pageToken = result.NextPageToken
 	}
 
 	return collections, nil
