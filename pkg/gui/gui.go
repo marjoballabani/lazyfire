@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/jesseduffield/gocui"
-	"github.com/mballabani/lazyfire/pkg/config"
-	"github.com/mballabani/lazyfire/pkg/firebase"
+	"github.com/marjoballabani/lazyfire/pkg/config"
+	"github.com/marjoballabani/lazyfire/pkg/firebase"
 )
 
 type CommandExecution struct {
@@ -623,7 +623,7 @@ func (g *Gui) updateDetailsView(v *gocui.View) {
 		fmt.Fprintln(v, "\033[33m       \\   |   /")
 		fmt.Fprintln(v, "\033[0m        \\__|__/")
 		fmt.Fprintln(v, "")
-		fmt.Fprintln(v, "\033[36m       L A Z Y F I R E\033[0m")
+		fmt.Fprintln(v, "\033[36m     L A Z Y F I R E\033[0m")
 		fmt.Fprintln(v, "")
 		fmt.Fprintln(v, "\033[90m   Select a document to view\033[0m")
 		return

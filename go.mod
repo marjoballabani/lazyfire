@@ -1,4 +1,4 @@
-module github.com/mballabani/lazyfire
+module github.com/marjoballabani/lazyfire
 
 go 1.25
 

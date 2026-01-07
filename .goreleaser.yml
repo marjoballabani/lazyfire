@@ -41,10 +41,10 @@ changelog:
 
 brews:
   - repository:
-      owner: mballabani
+      owner: marjoballabani
       name: homebrew-tap
     directory: Formula
-    homepage: https://github.com/mballabani/lazyfire
+    homepage: https://github.com/marjoballabani/lazyfire
     description: Terminal UI for browsing Firebase Firestore
     license: MIT
     install: |

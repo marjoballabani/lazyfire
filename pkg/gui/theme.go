@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/jesseduffield/gocui"
-	"github.com/mballabani/lazyfire/pkg/config"
+	"github.com/marjoballabani/lazyfire/pkg/config"
 )
 
 // Theme holds the parsed color attributes for the UI.

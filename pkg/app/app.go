@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mballabani/lazyfire/pkg/config"
-	"github.com/mballabani/lazyfire/pkg/firebase"
-	"github.com/mballabani/lazyfire/pkg/gui"
+	"github.com/marjoballabani/lazyfire/pkg/config"
+	"github.com/marjoballabani/lazyfire/pkg/firebase"
+	"github.com/marjoballabani/lazyfire/pkg/gui"
 	"github.com/pkg/errors"
 )
 

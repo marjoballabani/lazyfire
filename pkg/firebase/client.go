@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/mballabani/lazyfire/pkg/config"
+	"github.com/marjoballabani/lazyfire/pkg/config"
 )
 
 // Client manages Firebase connections and operations.

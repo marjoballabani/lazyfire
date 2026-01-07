@@ -13,7 +13,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/mballabani/lazyfire/pkg/app"
+	"github.com/marjoballabani/lazyfire/pkg/app"
 )
 
 // Build information, set via ldflags during compilation:
