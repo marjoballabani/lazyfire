@@ -9,13 +9,15 @@ import (
 	"github.com/mballabani/lazyfire/pkg/config"
 )
 
+// Theme holds the parsed color attributes for the UI.
 type Theme struct {
-	ActiveBorderColor   gocui.Attribute
-	InactiveBorderColor gocui.Attribute
-	OptionsTextColor    gocui.Attribute
-	SelectedLineBgColor gocui.Attribute
+	ActiveBorderColor   gocui.Attribute // Color for focused panel borders
+	InactiveBorderColor gocui.Attribute // Color for unfocused panel borders
+	OptionsTextColor    gocui.Attribute // Color for help text
+	SelectedLineBgColor gocui.Attribute // Background color for selected rows
 }
 
+// NewTheme creates a Theme from the configuration.
 func NewTheme(cfg config.ThemeConfig) *Theme {
 	return &Theme{
 		ActiveBorderColor:   parseColor(cfg.ActiveBorderColor),
@@ -25,6 +27,8 @@ func NewTheme(cfg config.ThemeConfig) *Theme {
 	}
 }
 
+// parseColor converts a color specification (e.g., ["#ff0000", "bold"]) to gocui.Attribute.
+// Supports colors and attributes combined.
 func parseColor(colorSpec []string) gocui.Attribute {
 	if len(colorSpec) == 0 {
 		return gocui.ColorDefault
@@ -50,8 +54,10 @@ func parseColor(colorSpec []string) gocui.Attribute {
 	return attr
 }
 
+// parseColorValue converts a single color value to gocui.Attribute.
+// Supports: named colors, hex colors (#RRGGBB), and 256-color numbers (0-255).
 func parseColorValue(color string) gocui.Attribute {
-	// Handle hex colors
+	// Handle hex colors (#RRGGBB)
 	if strings.HasPrefix(color, "#") {
 		return parseHexColor(color)
 	}
@@ -77,7 +83,7 @@ func parseColorValue(color string) gocui.Attribute {
 	case "white":
 		return gocui.ColorWhite
 	default:
-		// Try parsing as a number (256 color)
+		// Try parsing as 256-color number
 		if n, err := strconv.Atoi(color); err == nil && n >= 0 && n < 256 {
 			return gocui.Attribute(n) | gocui.AttrIsValidColor
 		}
@@ -85,6 +91,7 @@ func parseColorValue(color string) gocui.Attribute {
 	}
 }
 
+// parseHexColor converts a hex color string (#RRGGBB) to gocui.Attribute.
 func parseHexColor(hex string) gocui.Attribute {
 	hex = strings.TrimPrefix(hex, "#")
 	if len(hex) != 6 {
@@ -107,15 +114,16 @@ func parseHexColor(hex string) gocui.Attribute {
 	return gocui.NewRGBColor(int32(r), int32(g), int32(b))
 }
 
-// GetAnsiColorCode returns ANSI escape code for the active border color
+// GetAnsiColorCode returns the ANSI escape code for the active border color.
+// Used for coloring text output within views.
 func (t *Theme) GetAnsiColorCode() string {
 	return attributeToAnsi(t.ActiveBorderColor)
 }
 
+// attributeToAnsi converts a gocui.Attribute to an ANSI escape sequence.
 func attributeToAnsi(attr gocui.Attribute) string {
-	// Check for RGB color (true color)
+	// Check for RGB/true color
 	if attr&gocui.AttrIsValidColor != 0 {
-		// Extract RGB values from attribute
 		rgb := uint32(attr & 0xFFFFFF)
 		r := (rgb >> 16) & 0xFF
 		g := (rgb >> 8) & 0xFF
@@ -123,7 +131,7 @@ func attributeToAnsi(attr gocui.Attribute) string {
 		return fmt.Sprintf("\033[38;2;%d;%d;%dm", r, g, b)
 	}
 
-	// Basic colors - check the lower bits
+	// Basic 8 colors
 	switch attr & 0xFF {
 	case gocui.Attribute(0): // ColorDefault
 		return "\033[36m" // Default to cyan

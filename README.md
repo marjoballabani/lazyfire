@@ -1,4 +1,4 @@
-# LazyFire
+# 🔥 LazyFire
 
 A terminal UI for browsing Firebase Firestore, inspired by [lazygit](https://github.com/jesseduffield/lazygit).
 
@@ -8,23 +8,17 @@ A terminal UI for browsing Firebase Firestore, inspired by [lazygit](https://git
 
 ## Features
 
-- Browse Firestore collections and documents in a terminal UI
-- Expandable tree view for nested subcollections
-- View document data as formatted JSON
-- Vim-style keybindings (h/j/k/l navigation)
-- Customizable theme with hex color support
-- Uses existing Firebase/gcloud authentication
-- Dynamic panel sizing (focused panel expands)
+- 📂 Browse Firestore collections and documents
+- 🌳 Expandable tree view for nested subcollections
+- 📄 View document data as formatted JSON
+- ⌨️ Vim-style keybindings (h/j/k/l)
+- 🎨 Customizable theme (hex colors, 256-color, bold)
+- 🔐 Uses existing Firebase CLI authentication
+- 📐 Dynamic panel sizing (focused panel expands)
 
 ## Installation
 
-### Using Go
-
-```bash
-go install github.com/mballabani/lazyfire@latest
-```
-
-### Building from Source
+### From Source
 
 ```bash
 git clone https://github.com/mballabani/lazyfire.git
@@ -32,54 +26,74 @@ cd lazyfire
 go build -o lazyfire .
 ```
 
-## Prerequisites
-
-LazyFire requires authentication with Firebase or Google Cloud:
+### Using Go Install
 
 ```bash
-# Option 1: Firebase CLI (recommended)
-firebase login
+go install github.com/mballabani/lazyfire@latest
+```
 
-# Option 2: Google Cloud SDK
-gcloud auth application-default login
+## Prerequisites
+
+You must be authenticated with Firebase CLI:
+
+```bash
+firebase login
 ```
 
 ## Usage
 
 ```bash
-lazyfire
+./lazyfire
 ```
 
-### Keybindings
+## Layout
+
+```
+╭─────────────╮╭──────────────────────────────────────╮
+│  Projects   ││                                      │
+│             ││                                      │
+│   dev       ││           Details                    │
+│ * prod      ││                                      │
+│   staging   ││   {                                  │
+├─────────────┤│     "name": "John",                  │
+│ Collections ││     "email": "john@example.com",     │
+│             ││     "age": 30                        │
+│   users     ││   }                                  │
+│ * orders    ││                                      │
+│   products  ││                                      │
+├─────────────┤├──────────────────────────────────────┤
+│    Tree     ││  Commands                            │
+│             ││  ✓ ListCollections → 3 collections   │
+│  ├─ abc123  │╰──────────────────────────────────────╯
+│  └─ def456  │
+╰─────────────╯
+╭────────────────────────────────────────────────────╮
+│ ←/→ panels  j/k move  Space select  @ logs  q quit │
+╰────────────────────────────────────────────────────╯
+```
+
+**Left side (stacked):**
+- **Projects** - Your Firebase projects
+- **Collections** - Root collections in selected project
+- **Tree** - Documents and subcollections (expandable)
+
+**Right side:**
+- **Details** - Document JSON data
+- **Commands** - API call status
+
+## Keybindings
 
 | Key | Action |
 |-----|--------|
-| `h` / `←` | Move to left panel |
-| `l` / `→` | Move to right panel |
-| `j` / `↓` | Move down |
-| `k` / `↑` | Move up |
-| `Space` | Select project/collection, expand tree node |
-| `Esc` | Collapse tree node |
+| `h` `←` | Move to left panel |
+| `l` `→` | Move to right panel |
+| `j` `↓` | Move down in list |
+| `k` `↑` | Move up in list |
+| `Space` | Select / Expand |
+| `Esc` | Collapse node |
 | `r` | Refresh |
 | `@` | Show command history |
 | `q` | Quit |
-
-### Panels
-
-```
-┌─────────┬──────────┬─────────────┬─────────────────────┐
-│Projects │Collections│ Tree        │ Details             │
-│         │          │             │                     │
-│  dev    │  users   │ └─ users    │  {                  │
-│* prod   │* orders  │   ├─abc123  │    "name": "John",  │
-│  stage  │  products│   └─def456  │    "email": "j@x"   │
-│         │          │             │  }                  │
-├─────────┴──────────┴─────────────┴─────────────────────┤
-│ Commands                                               │
-├────────────────────────────────────────────────────────┤
-│ ←/→ panels  j/k move  Space select  @ history  q quit  │
-└────────────────────────────────────────────────────────┘
-```
 
 ## Configuration
 
@@ -88,8 +102,6 @@ Create `~/.lazyfire/config.yaml`:
 ```yaml
 ui:
   theme:
-    # Supports: named colors, hex (#ed8796), 256-color (0-255)
-    # Attributes: bold, underline, reverse
     activeBorderColor:
       - cyan
     inactiveBorderColor:
@@ -100,7 +112,14 @@ ui:
       - blue
 ```
 
-### Theme Examples
+### Color Options
+
+- **Named colors:** `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `default`
+- **Hex colors:** `#ed8796`, `#ff79c6`
+- **256-color:** `0` - `255`
+- **Attributes:** `bold`, `underline`, `reverse`
+
+### Example Themes
 
 **Catppuccin Macchiato:**
 ```yaml
@@ -125,18 +144,18 @@ ui:
 ## Requirements
 
 - Go 1.21+
-- Firebase CLI or Google Cloud SDK (for authentication)
+- Firebase CLI (`npm install -g firebase-tools`)
 - Terminal with true color support (recommended)
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions welcome! Please open an issue or PR.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT - see [LICENSE](LICENSE)
 
 ## Acknowledgments
 
-- [lazygit](https://github.com/jesseduffield/lazygit) - Inspiration for the UI design
+- [lazygit](https://github.com/jesseduffield/lazygit) - UI inspiration
 - [gocui](https://github.com/jesseduffield/gocui) - Terminal UI library
