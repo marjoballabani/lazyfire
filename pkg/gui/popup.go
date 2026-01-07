@@ -8,10 +8,10 @@ import (
 
 // PopupItem represents an item in a popup list
 type PopupItem struct {
-	Key         string                                              // Shortcut key to display
-	Label       string                                              // Item label/description
-	IsHeader    bool                                                // Headers are non-selectable section titles
-	Action      func(g *gocui.Gui, v *gocui.View) error             // Action to execute on Enter (optional)
+	Key      string       // Shortcut key to display
+	Label    string       // Item label/description
+	IsHeader bool         // Headers are non-selectable section titles
+	Action   func() error // Action to execute on Enter (optional)
 }
 
 // Popup represents a modal popup with selectable items
