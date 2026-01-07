@@ -319,13 +319,15 @@ func (g *Gui) buildHelpPopup() {
 		)
 	case "tree":
 		items = append(items,
-			PopupItem{Key: "Space", Label: "View document / Expand", Action: g.doSpace},
+			PopupItem{Key: "Space", Label: "Expand / Collapse", Action: g.doSpace},
+			PopupItem{Key: "Enter", Label: "Open in details", Action: g.doEnter},
 			PopupItem{Key: "c", Label: "Copy JSON to clipboard", Action: g.doCopyJSON},
 			PopupItem{Key: "s", Label: "Save JSON to Downloads", Action: g.doSaveJSON},
 		)
 	case "details":
 		items = append(items,
 			PopupItem{Key: "j/k", Label: "Scroll content"},
+			PopupItem{Key: "Esc", Label: "Go back"},
 			PopupItem{Key: "c", Label: "Copy JSON to clipboard", Action: g.doCopyJSON},
 			PopupItem{Key: "s", Label: "Save JSON to Downloads", Action: g.doSaveJSON},
 		)

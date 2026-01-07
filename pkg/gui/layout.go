@@ -559,7 +559,7 @@ func (g *Gui) updateDetailsView(v *gocui.View) {
 	v.Clear()
 
 	// Show fetched project details if available
-	if g.currentProjectInfo != nil && g.currentColumn == "projects" {
+	if g.currentProjectInfo != nil {
 		g.showFetchedProjectDetails(v)
 		return
 	}

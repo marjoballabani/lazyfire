@@ -75,8 +75,9 @@ type Gui struct {
 		helpModal   string
 	}
 
-	// Current column: "projects", "collections", "tree"
-	currentColumn string
+	// Current column: "projects", "collections", "tree", "details"
+	currentColumn  string
+	previousColumn string // Track previous column for returning from details
 
 	// Modal state
 	modalOpen bool

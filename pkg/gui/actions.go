@@ -14,9 +14,9 @@ func (g *Gui) doQuit() error {
 	return gocui.ErrQuit
 }
 
-// doEscape handles escape key - closes modals, cancels filter, or clears filter
+// doEscape handles escape key - closes modals, cancels filter, returns from details
 func (g *Gui) doEscape() error {
-	// Priority: help popup > command modal > filter input > committed filter
+	// Priority: help popup > command modal > filter input > committed filter > details panel
 	if g.helpOpen {
 		g.helpOpen = false
 		g.helpPopup = nil
@@ -31,6 +31,10 @@ func (g *Gui) doEscape() error {
 	}
 	if g.hasActiveFilter(g.currentColumn) {
 		return g.clearCurrentFilter(g.g)
+	}
+	// Return from details to previous panel
+	if g.currentColumn == "details" && g.previousColumn != "" {
+		return g.setFocus(g.g, g.previousColumn)
 	}
 	return nil
 }
@@ -115,24 +119,28 @@ func (g *Gui) filterInsertK() error { return g.insertFilterChar(g.g, 'k') }
 func (g *Gui) filterInsertH() error { return g.insertFilterChar(g.g, 'h') }
 func (g *Gui) filterInsertL() error { return g.insertFilterChar(g.g, 'l') }
 
-// doColumnLeft switches to the panel on the left
+// doColumnLeft switches to the panel on the left (skips details)
 func (g *Gui) doColumnLeft() error {
+	if g.currentColumn == "details" {
+		return nil // Use Esc to leave details
+	}
 	var newColumn string
 	switch g.currentColumn {
 	case "projects":
-		newColumn = "details"
+		newColumn = "tree" // wrap to tree
 	case "collections":
 		newColumn = "projects"
 	case "tree":
 		newColumn = "collections"
-	case "details":
-		newColumn = "tree"
 	}
 	return g.setFocus(g.g, newColumn)
 }
 
-// doColumnRight switches to the panel on the right
+// doColumnRight switches to the panel on the right (skips details)
 func (g *Gui) doColumnRight() error {
+	if g.currentColumn == "details" {
+		return nil // Use Esc to leave details
+	}
 	var newColumn string
 	switch g.currentColumn {
 	case "projects":
@@ -140,9 +148,7 @@ func (g *Gui) doColumnRight() error {
 	case "collections":
 		newColumn = "tree"
 	case "tree":
-		newColumn = "details"
-	case "details":
-		newColumn = "projects"
+		newColumn = "projects" // wrap to projects
 	}
 	return g.setFocus(g.g, newColumn)
 }
@@ -196,20 +202,13 @@ func (g *Gui) doCursorDown() error {
 	return g.Layout(g.g)
 }
 
-// doNextColumn cycles to the next panel
+// doNextColumn - Tab goes to details panel (keeps existing content)
 func (g *Gui) doNextColumn() error {
-	var newColumn string
-	switch g.currentColumn {
-	case "projects":
-		newColumn = "collections"
-	case "collections":
-		newColumn = "tree"
-	case "tree":
-		newColumn = "details"
-	case "details":
-		newColumn = "projects"
+	if g.currentColumn == "details" {
+		return nil // Already in details, do nothing
 	}
-	return g.setFocus(g.g, newColumn)
+	g.previousColumn = g.currentColumn
+	return g.setFocus(g.g, "details")
 }
 
 // doSpace handles space key - select/expand in current panel
@@ -236,6 +235,13 @@ func (g *Gui) doEnter() error {
 	switch g.currentColumn {
 	case "projects":
 		return g.fetchProjectDetails(g.g)
+	case "tree":
+		// Select the node (loads document) then go to details
+		if err := g.selectTreeNode(g.g); err != nil {
+			return err
+		}
+		g.previousColumn = g.currentColumn
+		return g.setFocus(g.g, "details")
 	}
 	return nil
 }
