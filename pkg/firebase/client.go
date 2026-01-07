@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os/exec"
 
 	"github.com/marjoballabani/lazyfire/pkg/config"
@@ -26,6 +28,19 @@ type Project struct {
 	ID          string // Firebase project ID
 	DisplayName string // Human-readable project name
 	Environment string // Environment identifier (same as ID for now)
+}
+
+// ProjectDetails contains extended information about a Firebase project.
+type ProjectDetails struct {
+	ProjectID     string   `json:"projectId"`
+	ProjectNumber string   `json:"projectNumber"`
+	DisplayName   string   `json:"displayName"`
+	Resources     struct {
+		HostingSite       string `json:"hostingSite"`
+		RealtimeDatabaseInstance string `json:"realtimeDatabaseInstance"`
+		StorageBucket     string `json:"storageBucket"`
+		LocationID        string `json:"locationId"`
+	} `json:"resources"`
 }
 
 // NewClient creates a new Firebase client using existing CLI authentication.
@@ -85,14 +100,8 @@ func (c *Client) ListProjects() ([]Project, error) {
 }
 
 // SetCurrentProject switches the active Firebase project.
-// This affects which Firestore database is queried.
+// This affects which Firestore database is queried via REST API.
 func (c *Client) SetCurrentProject(projectID string) error {
-	cmd := exec.Command("firebase", "use", projectID)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to switch to project %s: %v\nOutput: %s", projectID, err, string(output))
-	}
-
 	c.currentProject = projectID
 	return nil
 }
@@ -105,4 +114,43 @@ func (c *Client) GetCurrentProject() string {
 // IsUsingLocalAuth returns true if using Firebase CLI authentication.
 func (c *Client) IsUsingLocalAuth() bool {
 	return c.usingLocalAuth
+}
+
+// GetProjectDetails fetches extended information about a Firebase project.
+func (c *Client) GetProjectDetails(projectID string) (*ProjectDetails, error) {
+	token, err := c.getFirebaseToken()
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("https://firebase.googleapis.com/v1beta1/projects/%s", projectID)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var details ProjectDetails
+	if err := json.Unmarshal(body, &details); err != nil {
+		return nil, err
+	}
+
+	return &details, nil
 }

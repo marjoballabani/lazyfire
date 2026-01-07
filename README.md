@@ -21,7 +21,14 @@ A terminal UI for browsing Firebase Firestore, inspired by [lazygit](https://git
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew install marjoballabani/tap/lazyfire
+brew tap marjoballabani/tap
+brew install lazyfire
+```
+
+### Using Go Install
+
+```bash
+go install github.com/marjoballabani/lazyfire@latest
 ```
 
 ### From Source
@@ -32,29 +39,23 @@ cd lazyfire
 go build -o lazyfire .
 ```
 
-### Using Go Install
-
-```bash
-go install github.com/marjoballabani/lazyfire@latest
-```
-
 ### Download Binary
 
 Download pre-built binaries from the [releases page](https://github.com/marjoballabani/lazyfire/releases).
 
-## Prerequisites
+## Quick Start
 
-You must be authenticated with Firebase CLI:
+1. **Login to Firebase** (if not already):
+   ```bash
+   firebase login
+   ```
 
-```bash
-firebase login
-```
+2. **Run LazyFire:**
+   ```bash
+   lazyfire
+   ```
 
-## Usage
-
-```bash
-./lazyfire
-```
+3. **Navigate:** Use arrow keys or `h/j/k/l` to browse your Firestore data.
 
 ## Layout
 
@@ -99,9 +100,13 @@ firebase login
 | `l` `→` | Move to right panel |
 | `j` `↓` | Move down in list |
 | `k` `↑` | Move up in list |
+| `Enter` | View details (project info, resources) |
 | `Space` | Select / Expand |
-| `Esc` | Collapse node |
+| `c` | Copy document JSON to clipboard |
+| `s` | Save document JSON to ~/Downloads |
+| `Esc` | Collapse node / Close popup |
 | `r` | Refresh |
+| `?` | Show keyboard shortcuts |
 | `@` | Show command history |
 | `q` | Quit |
 
@@ -153,9 +158,9 @@ ui:
 
 ## Requirements
 
-- Go 1.21+
 - Firebase CLI (`npm install -g firebase-tools`)
 - Terminal with true color support (recommended)
+- Go 1.21+ (only if building from source)
 
 ## Contributing
 

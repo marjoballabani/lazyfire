@@ -4,6 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -11,6 +16,115 @@ import (
 	"github.com/marjoballabani/lazyfire/pkg/config"
 	"github.com/marjoballabani/lazyfire/pkg/firebase"
 )
+
+// ANSI color codes for JSON syntax highlighting
+const (
+	colorReset   = "\033[0m"
+	colorKey     = "\033[36m"  // Cyan for keys
+	colorString  = "\033[32m"  // Green for string values
+	colorNumber  = "\033[33m"  // Yellow for numbers
+	colorBool    = "\033[35m"  // Magenta for booleans
+	colorNull    = "\033[31m"  // Red for null
+	colorBracket = "\033[90m"  // Gray for brackets
+)
+
+// Precompiled regex pattern for JSON key detection
+var jsonKeyPattern = regexp.MustCompile(`"([^"\\]|\\.)*"\s*:`)
+
+// colorizeJSON adds ANSI color codes to JSON string for terminal display
+func colorizeJSON(jsonStr string) string {
+	var result strings.Builder
+	lines := strings.Split(jsonStr, "\n")
+
+	for i, line := range lines {
+		colored := colorizeLine(line)
+		result.WriteString(colored)
+		if i < len(lines)-1 {
+			result.WriteString("\n")
+		}
+	}
+
+	return result.String()
+}
+
+// colorizeLine applies syntax highlighting to a single line of JSON
+func colorizeLine(line string) string {
+	// Check for key-value patterns
+	if match := jsonKeyPattern.FindStringIndex(line); match != nil {
+		keyEnd := match[1]
+		key := line[match[0]:keyEnd]
+		rest := line[keyEnd:]
+
+		// Colorize the key
+		coloredKey := colorKey + key + colorReset
+
+		// Colorize the value
+		coloredValue := colorizeValue(rest)
+
+		return line[:match[0]] + coloredKey + coloredValue
+	}
+
+	// No key found, just colorize brackets
+	return colorizeBrackets(line)
+}
+
+// colorizeValue applies color to JSON values
+func colorizeValue(s string) string {
+	s = strings.TrimSpace(s)
+
+	// Check for string value
+	if strings.HasPrefix(s, `"`) {
+		return " " + colorString + s + colorReset
+	}
+
+	// Check for number
+	if len(s) > 0 && (s[0] == '-' || (s[0] >= '0' && s[0] <= '9')) {
+		// Find end of number
+		end := 0
+		for end < len(s) && (s[end] == '-' || s[end] == '.' || s[end] == 'e' || s[end] == 'E' || s[end] == '+' || (s[end] >= '0' && s[end] <= '9')) {
+			end++
+		}
+		if end > 0 {
+			return " " + colorNumber + s[:end] + colorReset + s[end:]
+		}
+	}
+
+	// Check for boolean
+	if strings.HasPrefix(s, "true") {
+		return " " + colorBool + "true" + colorReset + s[4:]
+	}
+	if strings.HasPrefix(s, "false") {
+		return " " + colorBool + "false" + colorReset + s[5:]
+	}
+
+	// Check for null
+	if strings.HasPrefix(s, "null") {
+		return " " + colorNull + "null" + colorReset + s[4:]
+	}
+
+	// Check for array/object start
+	if strings.HasPrefix(s, "{") || strings.HasPrefix(s, "[") {
+		return " " + colorizeBrackets(s)
+	}
+
+	return " " + s
+}
+
+// colorizeBrackets adds color to brackets and braces
+func colorizeBrackets(s string) string {
+	var result strings.Builder
+	for _, ch := range s {
+		switch ch {
+		case '{', '}', '[', ']':
+			result.WriteString(colorBracket)
+			result.WriteRune(ch)
+			result.WriteString(colorReset)
+		default:
+			result.WriteRune(ch)
+		}
+	}
+	return result.String()
+}
 
 type CommandExecution struct {
 	Timestamp   string
@@ -52,9 +166,10 @@ type Gui struct {
 	expandedPaths   map[string]bool
 
 	// Details state
-	currentDocPath   string
-	currentDocData   map[string]interface{}
-	detailsScrollPos int
+	currentDocPath     string
+	currentDocData     map[string]interface{}
+	currentProjectInfo *firebase.ProjectDetails
+	detailsScrollPos   int
 
 	// Command execution tracking
 	commandHistory []CommandExecution
@@ -69,6 +184,7 @@ type Gui struct {
 		commands    string
 		help        string
 		modal       string
+		helpModal   string
 	}
 
 	// Current column: "projects", "collections", "tree"
@@ -76,6 +192,8 @@ type Gui struct {
 
 	// Modal state
 	modalOpen bool
+	helpOpen  bool
+	helpPopup *Popup
 
 	// Loading state
 	isLoading   bool
@@ -127,6 +245,7 @@ func NewGui(config *config.Config, firebaseClient *firebase.Client, version stri
 	gui.views.commands = "commands"
 	gui.views.help = "help"
 	gui.views.modal = "modal"
+	gui.views.helpModal = "helpModal"
 	gui.views.background = "background"
 
 	// Configure gocui
@@ -445,6 +564,40 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 		g.updateHelpView(v)
 	}
 
+	// Help modal (keyboard shortcuts)
+	if g.helpOpen {
+		modalWidth := 50
+		modalHeight := 22
+		if modalHeight > maxY-4 {
+			modalHeight = maxY - 4
+		}
+		modalX := (maxX - modalWidth) / 2
+		modalY := (maxY - modalHeight) / 2
+
+		if v, err := gui.SetView(g.views.helpModal, modalX, modalY, modalX+modalWidth, modalY+modalHeight, 0); err != nil {
+			if !errors.Is(err, gocui.ErrUnknownView) {
+				return err
+			}
+			v.Title = " Keyboard Shortcuts "
+			v.TitleColor = g.theme.ActiveBorderColor
+			v.FrameColor = g.theme.ActiveBorderColor
+			v.FrameRunes = g.roundedFrameRunes
+			v.SelBgColor = g.theme.SelectedLineBgColor
+			v.SelFgColor = gocui.ColorDefault
+		}
+
+		if v, err := gui.View(g.views.helpModal); err == nil {
+			g.renderHelpContent(v)
+			if _, err := gui.SetCurrentView(g.views.helpModal); err != nil {
+				return fmt.Errorf("failed to set help view: %w", err)
+			}
+		}
+
+		return nil
+	} else {
+		gui.DeleteView(g.views.helpModal)
+	}
+
 	// Modal (centered popup for command logs)
 	if g.modalOpen {
 		modalWidth := maxX - 10
@@ -607,38 +760,152 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 func (g *Gui) updateDetailsView(v *gocui.View) {
 	v.Clear()
 
-	if g.currentDocData == nil {
-		// Firestore fire ASCII art
-		fmt.Fprintln(v, "")
-		fmt.Fprintln(v, "\033[33m           ,")
-		fmt.Fprintln(v, "\033[33m          /|\\")
-		fmt.Fprintln(v, "\033[33m         / | \\")
-		fmt.Fprintln(v, "\033[38;5;208m        /  |  \\")
-		fmt.Fprintln(v, "\033[38;5;208m       /   |   \\")
-		fmt.Fprintln(v, "\033[38;5;196m      /    |    \\")
-		fmt.Fprintln(v, "\033[38;5;196m     /     |     \\")
-		fmt.Fprintln(v, "\033[38;5;196m    (      |      )")
-		fmt.Fprintln(v, "\033[38;5;208m     \\     |     /")
-		fmt.Fprintln(v, "\033[33m      \\    |    /")
-		fmt.Fprintln(v, "\033[33m       \\   |   /")
-		fmt.Fprintln(v, "\033[0m        \\__|__/")
-		fmt.Fprintln(v, "")
-		fmt.Fprintln(v, "\033[36m     L A Z Y F I R E\033[0m")
-		fmt.Fprintln(v, "")
-		fmt.Fprintln(v, "\033[90m   Select a document to view\033[0m")
+	// Show document data if available (highest priority)
+	if g.currentDocData != nil {
+		fmt.Fprintf(v, "\033[36m─── %s ───\033[0m\n\n", g.currentDocPath)
+		data, err := json.MarshalIndent(g.currentDocData, "", "  ")
+		if err != nil {
+			fmt.Fprintf(v, "Error formatting data: %v\n", err)
+			return
+		}
+		fmt.Fprintln(v, colorizeJSON(string(data)))
 		return
 	}
 
-	fmt.Fprintf(v, "\033[36m─── %s ───\033[0m\n\n", g.currentDocPath)
-
-	// Pretty print JSON
-	data, err := json.MarshalIndent(g.currentDocData, "", "  ")
-	if err != nil {
-		fmt.Fprintf(v, "Error formatting data: %v\n", err)
+	// Show fetched project details if available
+	if g.currentProjectInfo != nil && g.currentColumn == "projects" {
+		g.showFetchedProjectDetails(v)
 		return
 	}
 
-	fmt.Fprintln(v, string(data))
+	// Show contextual info based on current column
+	switch g.currentColumn {
+	case "projects":
+		g.showProjectDetails(v)
+	case "collections":
+		g.showCollectionDetails(v)
+	case "tree":
+		g.showTreeNodeDetails(v)
+	default:
+		g.showWelcome(v)
+	}
+}
+
+func (g *Gui) showProjectDetails(v *gocui.View) {
+	if len(g.projects) == 0 || g.selectedProjectIndex >= len(g.projects) {
+		g.showWelcome(v)
+		return
+	}
+
+	project := g.projects[g.selectedProjectIndex]
+
+	fmt.Fprintln(v, "\033[36m─── Project Info ───\033[0m")
+	fmt.Fprintln(v, "")
+	fmt.Fprintf(v, "  \033[33mID:\033[0m          %s\n", project.ID)
+	fmt.Fprintf(v, "  \033[33mName:\033[0m        %s\n", project.DisplayName)
+	fmt.Fprintln(v, "")
+	fmt.Fprintln(v, "\033[90m  Press Enter for more details\033[0m")
+	fmt.Fprintln(v, "\033[90m  Press Space to select project\033[0m")
+}
+
+func (g *Gui) showFetchedProjectDetails(v *gocui.View) {
+	info := g.currentProjectInfo
+
+	fmt.Fprintln(v, "\033[36m─── Project Details ───\033[0m")
+	fmt.Fprintln(v, "")
+	fmt.Fprintf(v, "  \033[33mProject ID:\033[0m      %s\n", info.ProjectID)
+	fmt.Fprintf(v, "  \033[33mDisplay Name:\033[0m    %s\n", info.DisplayName)
+	if info.ProjectNumber != "" {
+		fmt.Fprintf(v, "  \033[33mProject Number:\033[0m  %s\n", info.ProjectNumber)
+	}
+	fmt.Fprintln(v, "")
+
+	// Resources section
+	if info.Resources.LocationID != "" || info.Resources.StorageBucket != "" ||
+		info.Resources.HostingSite != "" || info.Resources.RealtimeDatabaseInstance != "" {
+		fmt.Fprintln(v, "\033[36m─── Resources ───\033[0m")
+		fmt.Fprintln(v, "")
+		if info.Resources.LocationID != "" {
+			fmt.Fprintf(v, "  \033[33mLocation:\033[0m        %s\n", info.Resources.LocationID)
+		}
+		if info.Resources.StorageBucket != "" {
+			fmt.Fprintf(v, "  \033[33mStorage:\033[0m         %s\n", info.Resources.StorageBucket)
+		}
+		if info.Resources.HostingSite != "" {
+			fmt.Fprintf(v, "  \033[33mHosting:\033[0m         %s\n", info.Resources.HostingSite)
+		}
+		if info.Resources.RealtimeDatabaseInstance != "" {
+			fmt.Fprintf(v, "  \033[33mRTDB:\033[0m            %s\n", info.Resources.RealtimeDatabaseInstance)
+		}
+		fmt.Fprintln(v, "")
+	}
+
+	fmt.Fprintln(v, "\033[90m  Press Space to select project\033[0m")
+}
+
+func (g *Gui) showCollectionDetails(v *gocui.View) {
+	if len(g.collections) == 0 || g.selectedCollectionIdx >= len(g.collections) {
+		fmt.Fprintln(v, "\033[36m─── Collections ───\033[0m")
+		fmt.Fprintln(v, "")
+		fmt.Fprintln(v, "\033[90m  No collections found\033[0m")
+		fmt.Fprintln(v, "")
+		fmt.Fprintln(v, "\033[90m  Select a project first\033[0m")
+		return
+	}
+
+	collection := g.collections[g.selectedCollectionIdx]
+
+	fmt.Fprintln(v, "\033[36m─── Collection Info ───\033[0m")
+	fmt.Fprintln(v, "")
+	fmt.Fprintf(v, "  \033[33mName:\033[0m        %s\n", collection.Name)
+	fmt.Fprintf(v, "  \033[33mPath:\033[0m        /%s\n", collection.Path)
+	fmt.Fprintln(v, "")
+	fmt.Fprintln(v, "\033[90m  Press Space to browse documents\033[0m")
+}
+
+func (g *Gui) showTreeNodeDetails(v *gocui.View) {
+	if len(g.treeNodes) == 0 || g.selectedTreeIdx >= len(g.treeNodes) {
+		fmt.Fprintln(v, "\033[36m─── Tree ───\033[0m")
+		fmt.Fprintln(v, "")
+		fmt.Fprintln(v, "\033[90m  No documents loaded\033[0m")
+		fmt.Fprintln(v, "")
+		fmt.Fprintln(v, "\033[90m  Select a collection first\033[0m")
+		return
+	}
+
+	node := g.treeNodes[g.selectedTreeIdx]
+
+	fmt.Fprintln(v, "\033[36m─── Node Info ───\033[0m")
+	fmt.Fprintln(v, "")
+	fmt.Fprintf(v, "  \033[33mName:\033[0m        %s\n", node.Name)
+	fmt.Fprintf(v, "  \033[33mType:\033[0m        %s\n", node.Type)
+	fmt.Fprintf(v, "  \033[33mPath:\033[0m        /%s\n", node.Path)
+	fmt.Fprintln(v, "")
+	if node.Type == "document" {
+		fmt.Fprintln(v, "\033[90m  Press Space to view document data\033[0m")
+	} else {
+		fmt.Fprintln(v, "\033[90m  Press Space to expand collection\033[0m")
+	}
+}
+
+func (g *Gui) showWelcome(v *gocui.View) {
+	fmt.Fprintln(v, "")
+	fmt.Fprintln(v, "\033[33m           ,")
+	fmt.Fprintln(v, "\033[33m          /|\\")
+	fmt.Fprintln(v, "\033[33m         / | \\")
+	fmt.Fprintln(v, "\033[38;5;208m        /  |  \\")
+	fmt.Fprintln(v, "\033[38;5;208m       /   |   \\")
+	fmt.Fprintln(v, "\033[38;5;196m      /    |    \\")
+	fmt.Fprintln(v, "\033[38;5;196m     /     |     \\")
+	fmt.Fprintln(v, "\033[38;5;196m    (      |      )")
+	fmt.Fprintln(v, "\033[38;5;208m     \\     |     /")
+	fmt.Fprintln(v, "\033[33m      \\    |    /")
+	fmt.Fprintln(v, "\033[33m       \\   |   /")
+	fmt.Fprintln(v, "\033[0m        \\__|__/")
+	fmt.Fprintln(v, "")
+	fmt.Fprintln(v, "\033[36m     L A Z Y F I R E\033[0m")
+	fmt.Fprintln(v, "")
+	fmt.Fprintln(v, "\033[90m   Select a project to start\033[0m")
 }
 
 func (g *Gui) updateCommandsView(v *gocui.View) {
@@ -676,7 +943,7 @@ func (g *Gui) updateCommandsView(v *gocui.View) {
 
 func (g *Gui) updateHelpView(v *gocui.View) {
 	v.Clear()
-	helpText := " \033[36m←/→\033[0m columns  \033[36mj/k\033[0m move  \033[33mspace\033[0m select  \033[33mEsc\033[0m back  \033[35mr\033[0m refresh  \033[31mq\033[0m quit"
+	helpText := " \033[36m←/→\033[0m cols  \033[36mj/k\033[0m move  \033[33mspace\033[0m select  \033[32mc\033[0m copy  \033[32ms\033[0m save  \033[35m?\033[0m help  \033[31mq\033[0m quit"
 	versionText := fmt.Sprintf("\033[90mv%s\033[0m ", g.version)
 
 	// Calculate padding to right-align version
@@ -744,12 +1011,32 @@ func (g *Gui) setKeybindings() error {
 	}
 
 	// Space to select/expand
-	if err := g.g.SetKeybinding("", gocui.KeySpace, gocui.ModNone, g.handleEnter); err != nil {
+	if err := g.g.SetKeybinding("", gocui.KeySpace, gocui.ModNone, g.handleSpace); err != nil {
+		return err
+	}
+
+	// Enter to view details
+	if err := g.g.SetKeybinding("", gocui.KeyEnter, gocui.ModNone, g.handleEnter); err != nil {
 		return err
 	}
 
 	// @ to toggle command log modal
 	if err := g.g.SetKeybinding("", '@', gocui.ModNone, g.toggleModal); err != nil {
+		return err
+	}
+
+	// c to copy JSON to clipboard (when document is selected)
+	if err := g.g.SetKeybinding("", 'c', gocui.ModNone, g.copyJSON); err != nil {
+		return err
+	}
+
+	// s to save JSON to file (when document is selected)
+	if err := g.g.SetKeybinding("", 's', gocui.ModNone, g.saveJSON); err != nil {
+		return err
+	}
+
+	// ? to show help
+	if err := g.g.SetKeybinding("", '?', gocui.ModNone, g.toggleHelp); err != nil {
 		return err
 	}
 
@@ -827,10 +1114,17 @@ func (g *Gui) nextColumn(gui *gocui.Gui, v *gocui.View) error {
 }
 
 func (g *Gui) cursorDown(gui *gocui.Gui, v *gocui.View) error {
+	// Handle help modal scrolling
+	if g.helpOpen && g.helpPopup != nil {
+		g.helpPopup.MoveDown()
+		return g.Layout(gui)
+	}
+
 	switch g.currentColumn {
 	case "projects":
 		if g.selectedProjectIndex < len(g.projects)-1 {
 			g.selectedProjectIndex++
+			g.currentProjectInfo = nil // Clear details when changing selection
 		}
 	case "collections":
 		if g.selectedCollectionIdx < len(g.collections)-1 {
@@ -847,10 +1141,17 @@ func (g *Gui) cursorDown(gui *gocui.Gui, v *gocui.View) error {
 }
 
 func (g *Gui) cursorUp(gui *gocui.Gui, v *gocui.View) error {
+	// Handle help modal scrolling
+	if g.helpOpen && g.helpPopup != nil {
+		g.helpPopup.MoveUp()
+		return g.Layout(gui)
+	}
+
 	switch g.currentColumn {
 	case "projects":
 		if g.selectedProjectIndex > 0 {
 			g.selectedProjectIndex--
+			g.currentProjectInfo = nil // Clear details when changing selection
 		}
 	case "collections":
 		if g.selectedCollectionIdx > 0 {
@@ -868,7 +1169,102 @@ func (g *Gui) cursorUp(gui *gocui.Gui, v *gocui.View) error {
 	return g.Layout(gui)
 }
 
-func (g *Gui) handleEnter(gui *gocui.Gui, v *gocui.View) error {
+func (g *Gui) copyJSON(gui *gocui.Gui, v *gocui.View) error {
+	docData, docPath, err := g.getDocumentToCopy()
+	if err != nil {
+		g.logCommand("copy", err.Error(), "error")
+		return nil
+	}
+
+	data, err := json.MarshalIndent(docData, "", "  ")
+	if err != nil {
+		g.logCommand("copy", fmt.Sprintf("Failed to marshal JSON: %v", err), "error")
+		return nil
+	}
+
+	// Copy to clipboard using platform-specific command
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbcopy")
+	case "linux":
+		cmd = exec.Command("xclip", "-selection", "clipboard")
+	default:
+		g.logCommand("copy", "Clipboard not supported on this platform", "error")
+		return nil
+	}
+
+	cmd.Stdin = strings.NewReader(string(data))
+	if err := cmd.Run(); err != nil {
+		g.logCommand("copy", fmt.Sprintf("Failed to copy: %v", err), "error")
+		return nil
+	}
+
+	g.logCommand("copy", fmt.Sprintf("Copied %s to clipboard", docPath), "success")
+	return nil
+}
+
+func (g *Gui) saveJSON(gui *gocui.Gui, v *gocui.View) error {
+	docData, docPath, err := g.getDocumentToCopy()
+	if err != nil {
+		g.logCommand("save", err.Error(), "error")
+		return nil
+	}
+
+	data, err := json.MarshalIndent(docData, "", "  ")
+	if err != nil {
+		g.logCommand("save", fmt.Sprintf("Failed to marshal JSON: %v", err), "error")
+		return nil
+	}
+
+	// Create filename from document path
+	safePath := strings.ReplaceAll(docPath, "/", "_")
+	filename := fmt.Sprintf("%s.json", safePath)
+
+	// Save to Downloads directory
+	home, _ := os.UserHomeDir()
+	downloadDir := filepath.Join(home, "Downloads")
+	fullPath := filepath.Join(downloadDir, filename)
+
+	if err := os.WriteFile(fullPath, data, 0644); err != nil {
+		g.logCommand("save", fmt.Sprintf("Failed to save: %v", err), "error")
+		return nil
+	}
+
+	g.logCommand("save", fmt.Sprintf("Saved to %s", fullPath), "success")
+	return nil
+}
+
+// getDocumentToCopy returns the document data to copy/save.
+// If on tree panel with a document highlighted, fetches that document and displays it.
+// Otherwise returns the currently displayed document.
+func (g *Gui) getDocumentToCopy() (map[string]interface{}, string, error) {
+	// If on tree panel with a document node selected, fetch that document
+	if g.currentColumn == "tree" && len(g.treeNodes) > 0 && g.selectedTreeIdx < len(g.treeNodes) {
+		node := g.treeNodes[g.selectedTreeIdx]
+		if node.Type == "document" {
+			// Fetch the document
+			doc, err := g.firebaseClient.GetDocument(node.Path)
+			if err != nil {
+				return nil, "", fmt.Errorf("Failed to fetch document: %v", err)
+			}
+			// Also display it in Details panel
+			g.currentDocData = doc.Data
+			g.currentDocPath = node.Path
+			return doc.Data, node.Path, nil
+		}
+		return nil, "", fmt.Errorf("Selected item is a collection, not a document")
+	}
+
+	// Otherwise use the currently displayed document
+	if g.currentDocData != nil {
+		return g.currentDocData, g.currentDocPath, nil
+	}
+
+	return nil, "", fmt.Errorf("No document selected")
+}
+
+func (g *Gui) handleSpace(gui *gocui.Gui, v *gocui.View) error {
 	switch g.currentColumn {
 	case "projects":
 		return g.selectProject(gui)
@@ -877,6 +1273,50 @@ func (g *Gui) handleEnter(gui *gocui.Gui, v *gocui.View) error {
 	case "tree":
 		return g.selectTreeNode(gui)
 	}
+	return nil
+}
+
+func (g *Gui) handleEnter(gui *gocui.Gui, v *gocui.View) error {
+	// Handle help popup action execution
+	if g.helpOpen && g.helpPopup != nil {
+		item := g.helpPopup.GetSelectedItem()
+		if item != nil && item.Action != nil {
+			g.helpOpen = false
+			g.helpPopup = nil
+			return item.Action(gui, v)
+		}
+		return nil
+	}
+
+	switch g.currentColumn {
+	case "projects":
+		return g.fetchProjectDetails(gui)
+	}
+	return nil
+}
+
+func (g *Gui) fetchProjectDetails(gui *gocui.Gui) error {
+	if g.selectedProjectIndex >= len(g.projects) {
+		return nil
+	}
+
+	project := g.projects[g.selectedProjectIndex]
+	g.logCommand("api", fmt.Sprintf("GetProjectDetails(%s)...", project.ID), "running")
+
+	go func() {
+		details, err := g.firebaseClient.GetProjectDetails(project.ID)
+		g.g.Update(func(gui *gocui.Gui) error {
+			if err != nil {
+				g.logCommand("api", fmt.Sprintf("GetProjectDetails failed: %v", err), "error")
+				return nil
+			}
+			g.currentProjectInfo = details
+			g.currentDocData = nil // Clear doc data so project info shows
+			g.logCommand("api", fmt.Sprintf("GetProjectDetails(%s) → success", project.ID), "success")
+			return nil
+		})
+	}()
+
 	return nil
 }
 
@@ -1134,7 +1574,14 @@ func (g *Gui) collapseNode(idx int) {
 }
 
 func (g *Gui) handleEscape(gui *gocui.Gui, v *gocui.View) error {
-	// Close modal if open
+	// Close help modal if open
+	if g.helpOpen {
+		g.helpOpen = false
+		g.helpPopup = nil
+		return nil
+	}
+
+	// Close command modal if open
 	if g.modalOpen {
 		g.modalOpen = false
 		return nil
@@ -1158,6 +1605,106 @@ func (g *Gui) handleEscape(gui *gocui.Gui, v *gocui.View) error {
 func (g *Gui) toggleModal(gui *gocui.Gui, v *gocui.View) error {
 	g.modalOpen = !g.modalOpen
 	return g.Layout(gui)
+}
+
+func (g *Gui) toggleHelp(gui *gocui.Gui, v *gocui.View) error {
+	g.helpOpen = !g.helpOpen
+	if g.helpOpen {
+		g.helpPopup = g.buildHelpPopup()
+	} else {
+		g.helpPopup = nil
+	}
+	return g.Layout(gui)
+}
+
+// buildHelpPopup creates the help popup with global and context-specific shortcuts
+func (g *Gui) buildHelpPopup() *Popup {
+	items := []PopupItem{
+		{Key: "", Label: "Global", IsHeader: true},
+		{Key: "←/→ h/l", Label: "Switch panels", Action: nil},
+		{Key: "↑/↓ j/k", Label: "Move up/down", Action: nil},
+		{Key: "Space", Label: "Select / Expand", Action: g.handleSpace},
+		{Key: "Esc", Label: "Back / Collapse / Close", Action: g.handleEscape},
+		{Key: "r", Label: "Refresh", Action: g.refresh},
+		{Key: "@", Label: "Command log", Action: g.toggleModal},
+		{Key: "?", Label: "This help", Action: nil},
+		{Key: "q", Label: "Quit", Action: g.quit},
+		{Key: "", Label: g.getPanelName(), IsHeader: true},
+	}
+
+	// Add context-specific items with their actions
+	switch g.currentColumn {
+	case "projects":
+		items = append(items,
+			PopupItem{Key: "Enter", Label: "Fetch project details", Action: g.fetchProjectDetailsAction},
+			PopupItem{Key: "Space", Label: "Select project", Action: g.selectProjectAction},
+		)
+	case "collections":
+		items = append(items,
+			PopupItem{Key: "Space", Label: "Load documents", Action: g.selectCollectionAction},
+		)
+	case "tree":
+		items = append(items,
+			PopupItem{Key: "Space", Label: "View document / Expand", Action: g.selectTreeNodeAction},
+			PopupItem{Key: "c", Label: "Copy JSON to clipboard", Action: g.copyJSON},
+			PopupItem{Key: "s", Label: "Save JSON to Downloads", Action: g.saveJSON},
+		)
+	case "details":
+		items = append(items,
+			PopupItem{Key: "j/k", Label: "Scroll content", Action: nil},
+			PopupItem{Key: "c", Label: "Copy JSON to clipboard", Action: g.copyJSON},
+			PopupItem{Key: "s", Label: "Save JSON to Downloads", Action: g.saveJSON},
+		)
+	}
+
+	return NewPopup("Keyboard Shortcuts", items, g.theme, g.views.helpModal)
+}
+
+// Action wrappers that close help first
+func (g *Gui) selectProjectAction(gui *gocui.Gui, v *gocui.View) error {
+	g.helpOpen = false
+	g.helpPopup = nil
+	return g.selectProject(gui)
+}
+
+func (g *Gui) selectCollectionAction(gui *gocui.Gui, v *gocui.View) error {
+	g.helpOpen = false
+	g.helpPopup = nil
+	return g.selectCollection(gui)
+}
+
+func (g *Gui) selectTreeNodeAction(gui *gocui.Gui, v *gocui.View) error {
+	g.helpOpen = false
+	g.helpPopup = nil
+	return g.selectTreeNode(gui)
+}
+
+func (g *Gui) fetchProjectDetailsAction(gui *gocui.Gui, v *gocui.View) error {
+	g.helpOpen = false
+	g.helpPopup = nil
+	return g.fetchProjectDetails(gui)
+}
+
+func (g *Gui) renderHelpContent(v *gocui.View) {
+	if g.helpPopup == nil {
+		return
+	}
+	g.helpPopup.Render(v)
+}
+
+func (g *Gui) getPanelName() string {
+	switch g.currentColumn {
+	case "projects":
+		return "Projects"
+	case "collections":
+		return "Collections"
+	case "tree":
+		return "Tree"
+	case "details":
+		return "Details"
+	default:
+		return "Current Panel"
+	}
 }
 
 func (g *Gui) refresh(gui *gocui.Gui, v *gocui.View) error {
