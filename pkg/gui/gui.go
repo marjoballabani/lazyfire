@@ -386,28 +386,34 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 	leftWidth := maxX / 3
 
 	// Calculate heights for left panels (3 stacked)
-	// Focused panel gets more space (50%), unfocused share the rest (25% each)
 	leftHeight := maxY - 3 // Leave room for help bar
 
 	var projectsEnd, collectionsEnd int
-	expandedHeight := leftHeight / 2      // 50% for focused
-	collapsedHeight := leftHeight / 4     // 25% for unfocused
+	collapsedSingleLine := 3 // Height for collapsed single-line panel (borders + 1 line)
 
 	switch g.currentColumn {
 	case "projects":
+		// Projects expanded, others share remaining space
+		expandedHeight := leftHeight / 2
+		remainingHeight := leftHeight - expandedHeight
 		projectsEnd = expandedHeight
-		collectionsEnd = expandedHeight + collapsedHeight
+		collectionsEnd = expandedHeight + remainingHeight/2
 	case "collections":
-		projectsEnd = collapsedHeight
-		collectionsEnd = collapsedHeight + expandedHeight
+		// Projects collapsed to 1 line, collections expanded
+		remainingHeight := leftHeight - collapsedSingleLine
+		expandedHeight := remainingHeight * 2 / 3
+		projectsEnd = collapsedSingleLine
+		collectionsEnd = collapsedSingleLine + expandedHeight
 	case "tree":
-		projectsEnd = collapsedHeight
-		collectionsEnd = collapsedHeight * 2
+		// Projects collapsed to 1 line, tree gets more space
+		remainingHeight := leftHeight - collapsedSingleLine
+		projectsEnd = collapsedSingleLine
+		collectionsEnd = collapsedSingleLine + remainingHeight/3
 	default: // details or other
-		// Equal distribution when not in left panels
-		panelHeight := leftHeight / 3
-		projectsEnd = panelHeight
-		collectionsEnd = panelHeight * 2
+		// Projects collapsed to 1 line, equal split for collections/tree
+		remainingHeight := leftHeight - collapsedSingleLine
+		projectsEnd = collapsedSingleLine
+		collectionsEnd = collapsedSingleLine + remainingHeight/2
 	}
 
 	// Right side layout
@@ -428,17 +434,18 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 	}
 
 	if v, err := gui.View(g.views.projects); err == nil {
-		// Set footer with count
-		if len(g.projects) > 0 {
-			v.Footer = fmt.Sprintf("%d of %d", g.selectedProjectIndex+1, len(g.projects))
-		} else {
-			v.Footer = "0 of 0"
-		}
 		// Title color matches border (active/inactive based on focus)
 		if g.currentColumn == "projects" {
 			v.TitleColor = g.theme.ActiveBorderColor
+			// Show footer only when expanded
+			if len(g.projects) > 0 {
+				v.Footer = fmt.Sprintf("%d of %d", g.selectedProjectIndex+1, len(g.projects))
+			} else {
+				v.Footer = "0 of 0"
+			}
 		} else {
 			v.TitleColor = g.theme.InactiveBorderColor
+			v.Footer = "" // Hide footer when collapsed
 		}
 		g.updateProjectsView(v)
 	}
@@ -671,6 +678,16 @@ func (g *Gui) updateProjectsView(v *gocui.View) {
 	// Enable highlight when this view is focused
 	v.Highlight = g.currentColumn == "projects" && len(g.projects) > 0
 
+	// When collapsed (not focused), show only the selected project
+	if g.currentColumn != "projects" {
+		if len(g.projects) > 0 && g.selectedProjectIndex < len(g.projects) {
+			project := g.projects[g.selectedProjectIndex]
+			fmt.Fprintf(v, "%s*\033[0m %s", g.getActiveColorCode(), project.DisplayName)
+		}
+		return
+	}
+
+	// Expanded view - show all projects
 	for _, project := range g.projects {
 		if project.ID == g.currentProject {
 			fmt.Fprintf(v, "%s*\033[0m %s\n", g.getActiveColorCode(), project.DisplayName)
