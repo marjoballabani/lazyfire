@@ -15,6 +15,7 @@ type Theme struct {
 	InactiveBorderColor gocui.Attribute // Color for unfocused panel borders
 	OptionsTextColor    gocui.Attribute // Color for help text
 	SelectedLineBgColor gocui.Attribute // Background color for selected rows
+	FilterBorderColor   gocui.Attribute // Color for filtered panel borders (yellowish)
 }
 
 // NewTheme creates a Theme from the configuration.
@@ -24,6 +25,7 @@ func NewTheme(cfg config.ThemeConfig) *Theme {
 		InactiveBorderColor: parseColor(cfg.InactiveBorderColor),
 		OptionsTextColor:    parseColor(cfg.OptionsTextColor),
 		SelectedLineBgColor: parseColor(cfg.SelectedLineBgColor),
+		FilterBorderColor:   parseColor([]string{"#eed49f", "bold"}), // Yellow (Catppuccin) for filter mode
 	}
 }
 

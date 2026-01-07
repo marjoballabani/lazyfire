@@ -204,6 +204,17 @@ type Gui struct {
 	isLoading   bool
 	loadingText string
 
+	// Filter state
+	filterInputActive bool   // true when typing in filter bar
+	filterInputText   string // current input text
+	filterInputPanel  string // which panel is being filtered
+
+	// Committed filters (persist after Enter, cleared by Esc)
+	projectsFilter    string
+	collectionsFilter string
+	treeFilter        string
+	detailsFilter     string
+
 	// Frame styling
 	roundedFrameRunes []rune
 }
@@ -450,17 +461,41 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 	}
 
 	if v, err := gui.View(g.views.projects); err == nil {
-		// Title color matches border (active/inactive based on focus)
-		if g.currentColumn == "projects" {
+		hasCommittedFilter := g.hasActiveFilter("projects")
+		isTypingFilter := g.isFilteringPanel("projects")
+		isFocused := g.currentColumn == "projects"
+
+		// Title/border color: filter color when focused AND filter is committed (not while typing)
+		if isFocused && hasCommittedFilter {
+			// Must set global SelFrameColor because gocui uses it for focused views
+			gui.SelFrameColor = g.theme.FilterBorderColor
+			gui.SelFgColor = g.theme.FilterBorderColor
+			v.TitleColor = g.theme.FilterBorderColor
+			v.FrameColor = g.theme.FilterBorderColor
+			v.Title = " " + icons.PROJECT_ICON + " Projects "
+		} else if isFocused {
+			gui.SelFrameColor = g.theme.ActiveBorderColor
+			gui.SelFgColor = g.theme.ActiveBorderColor
 			v.TitleColor = g.theme.ActiveBorderColor
-			// Show footer only when expanded
-			if len(g.projects) > 0 {
+			v.FrameColor = g.theme.ActiveBorderColor
+			v.Title = " " + icons.PROJECT_ICON + " Projects "
+		} else {
+			v.TitleColor = g.theme.InactiveBorderColor
+			v.FrameColor = g.theme.InactiveBorderColor
+			v.Title = " " + icons.PROJECT_ICON + " Projects "
+		}
+		// Show footer only when expanded
+		hasFilter := hasCommittedFilter || isTypingFilter
+		if isFocused {
+			filtered := g.getFilteredProjects()
+			if hasFilter {
+				v.Footer = fmt.Sprintf("%d/%d matched", len(filtered), len(g.projects))
+			} else if len(g.projects) > 0 {
 				v.Footer = fmt.Sprintf("%d of %d", g.selectedProjectIndex+1, len(g.projects))
 			} else {
 				v.Footer = "0 of 0"
 			}
 		} else {
-			v.TitleColor = g.theme.InactiveBorderColor
 			v.Footer = "" // Hide footer when collapsed
 		}
 		g.updateProjectsView(v)
@@ -481,17 +516,35 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 	}
 
 	if v, err := gui.View(g.views.collections); err == nil {
+		hasCommittedFilter := g.hasActiveFilter("collections")
+		isTypingFilter := g.isFilteringPanel("collections")
+		isFocused := g.currentColumn == "collections"
+
+		// Title/border color: filter color when focused AND filter is committed (not while typing)
+		if isFocused && hasCommittedFilter {
+			gui.SelFrameColor = g.theme.FilterBorderColor
+			gui.SelFgColor = g.theme.FilterBorderColor
+			v.TitleColor = g.theme.FilterBorderColor
+			v.FrameColor = g.theme.FilterBorderColor
+		} else if isFocused {
+			gui.SelFrameColor = g.theme.ActiveBorderColor
+			gui.SelFgColor = g.theme.ActiveBorderColor
+			v.TitleColor = g.theme.ActiveBorderColor
+			v.FrameColor = g.theme.ActiveBorderColor
+		} else {
+			v.TitleColor = g.theme.InactiveBorderColor
+			v.FrameColor = g.theme.InactiveBorderColor
+		}
+		v.Title = " " + icons.COLLECTION_ICON + " Collections "
 		// Set footer with count
-		if len(g.collections) > 0 {
+		filtered := g.getFilteredCollections()
+		hasFilter := hasCommittedFilter || isTypingFilter
+		if hasFilter {
+			v.Footer = fmt.Sprintf("%d/%d matched", len(filtered), len(g.collections))
+		} else if len(g.collections) > 0 {
 			v.Footer = fmt.Sprintf("%d of %d", g.selectedCollectionIdx+1, len(g.collections))
 		} else {
 			v.Footer = "0 of 0"
-		}
-		// Title color matches border (active/inactive based on focus)
-		if g.currentColumn == "collections" {
-			v.TitleColor = g.theme.ActiveBorderColor
-		} else {
-			v.TitleColor = g.theme.InactiveBorderColor
 		}
 		g.updateCollectionsView(v)
 	}
@@ -511,17 +564,35 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 	}
 
 	if v, err := gui.View(g.views.tree); err == nil {
+		hasCommittedFilter := g.hasActiveFilter("tree")
+		isTypingFilter := g.isFilteringPanel("tree")
+		isFocused := g.currentColumn == "tree"
+
+		// Title/border color: filter color when focused AND filter is committed (not while typing)
+		if isFocused && hasCommittedFilter {
+			gui.SelFrameColor = g.theme.FilterBorderColor
+			gui.SelFgColor = g.theme.FilterBorderColor
+			v.TitleColor = g.theme.FilterBorderColor
+			v.FrameColor = g.theme.FilterBorderColor
+		} else if isFocused {
+			gui.SelFrameColor = g.theme.ActiveBorderColor
+			gui.SelFgColor = g.theme.ActiveBorderColor
+			v.TitleColor = g.theme.ActiveBorderColor
+			v.FrameColor = g.theme.ActiveBorderColor
+		} else {
+			v.TitleColor = g.theme.InactiveBorderColor
+			v.FrameColor = g.theme.InactiveBorderColor
+		}
+		v.Title = " " + icons.TREE_ICON + " Tree "
 		// Set footer with count
-		if len(g.treeNodes) > 0 {
+		filtered := g.getFilteredTreeNodes()
+		hasFilter := hasCommittedFilter || isTypingFilter
+		if hasFilter {
+			v.Footer = fmt.Sprintf("%d/%d matched", len(filtered), len(g.treeNodes))
+		} else if len(g.treeNodes) > 0 {
 			v.Footer = fmt.Sprintf("%d of %d", g.selectedTreeIdx+1, len(g.treeNodes))
 		} else {
 			v.Footer = "0 of 0"
-		}
-		// Title color matches border (active/inactive based on focus)
-		if g.currentColumn == "tree" {
-			v.TitleColor = g.theme.ActiveBorderColor
-		} else {
-			v.TitleColor = g.theme.InactiveBorderColor
 		}
 		g.updateTreeView(v)
 	}
@@ -542,12 +613,26 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 	}
 
 	if v, err := gui.View(g.views.details); err == nil {
-		if g.currentColumn == "details" {
+		hasCommittedFilter := g.hasActiveFilter("details")
+		isFocused := g.currentColumn == "details"
+
+		// Title/border color: filter color when focused AND filter is committed (not while typing)
+		if isFocused && hasCommittedFilter {
+			gui.SelFrameColor = g.theme.FilterBorderColor
+			gui.SelFgColor = g.theme.FilterBorderColor
+			v.Title = " " + icons.DETAILS_ICON + " Details (filtered) "
+			v.TitleColor = g.theme.FilterBorderColor
+			v.FrameColor = g.theme.FilterBorderColor
+		} else if isFocused {
+			gui.SelFrameColor = g.theme.ActiveBorderColor
+			gui.SelFgColor = g.theme.ActiveBorderColor
 			v.Title = " " + icons.DETAILS_ICON + " Details (j/k scroll) "
 			v.TitleColor = g.theme.ActiveBorderColor
+			v.FrameColor = g.theme.ActiveBorderColor
 		} else {
 			v.Title = " " + icons.DETAILS_ICON + " Details "
 			v.TitleColor = g.theme.InactiveBorderColor
+			v.FrameColor = g.theme.InactiveBorderColor
 		}
 		g.updateDetailsView(v)
 		v.SetOrigin(0, g.detailsScrollPos)
@@ -691,8 +776,10 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 func (g *Gui) updateProjectsView(v *gocui.View) {
 	v.Clear()
 
+	filtered := g.getFilteredProjects()
+
 	// Enable highlight when this view is focused
-	v.Highlight = g.currentColumn == "projects" && len(g.projects) > 0
+	v.Highlight = g.currentColumn == "projects" && len(filtered) > 0
 
 	// Project icon with spacing
 	icon := icons.PROJECT_ICON
@@ -702,15 +789,15 @@ func (g *Gui) updateProjectsView(v *gocui.View) {
 
 	// When collapsed (not focused), show only the selected project
 	if g.currentColumn != "projects" {
-		if len(g.projects) > 0 && g.selectedProjectIndex < len(g.projects) {
-			project := g.projects[g.selectedProjectIndex]
+		if len(filtered) > 0 && g.selectedProjectIndex < len(filtered) {
+			project := filtered[g.selectedProjectIndex]
 			fmt.Fprintf(v, "%s*\033[0m %s%s", g.getActiveColorCode(), icon, project.DisplayName)
 		}
 		return
 	}
 
-	// Expanded view - show all projects
-	for _, project := range g.projects {
+	// Expanded view - show filtered projects
+	for _, project := range filtered {
 		if project.ID == g.currentProject {
 			fmt.Fprintf(v, "%s*\033[0m %s%s\n", g.getActiveColorCode(), icon, project.DisplayName)
 		} else {
@@ -719,7 +806,11 @@ func (g *Gui) updateProjectsView(v *gocui.View) {
 	}
 
 	// Handle scrolling and set cursor for highlight
-	if len(g.projects) > 0 {
+	if len(filtered) > 0 {
+		// Clamp selection to filtered list
+		if g.selectedProjectIndex >= len(filtered) {
+			g.selectedProjectIndex = len(filtered) - 1
+		}
 		v.FocusPoint(0, g.selectedProjectIndex, true)
 	}
 }
@@ -727,16 +818,16 @@ func (g *Gui) updateProjectsView(v *gocui.View) {
 func (g *Gui) updateCollectionsView(v *gocui.View) {
 	v.Clear()
 
-	// Enable highlight when this view is focused
-	v.Highlight = g.currentColumn == "collections" && len(g.collections) > 0
+	filtered := g.getFilteredCollections()
 
-	if len(g.collections) == 0 {
-		// fmt.Fprintln(v, "\033[90m Select a project\033[0m")
-		// fmt.Fprintln(v, "\033[90m and press Space\033[0m")
+	// Enable highlight when this view is focused
+	v.Highlight = g.currentColumn == "collections" && len(filtered) > 0
+
+	if len(filtered) == 0 {
 		return
 	}
 
-	for _, col := range g.collections {
+	for _, col := range filtered {
 		icon := icons.COLLECTION_ICON
 		if icon != "" {
 			icon = icon + " "
@@ -749,7 +840,11 @@ func (g *Gui) updateCollectionsView(v *gocui.View) {
 	}
 
 	// Handle scrolling and set cursor for highlight
-	if len(g.collections) > 0 {
+	if len(filtered) > 0 {
+		// Clamp selection to filtered list
+		if g.selectedCollectionIdx >= len(filtered) {
+			g.selectedCollectionIdx = len(filtered) - 1
+		}
 		v.FocusPoint(0, g.selectedCollectionIdx, true)
 	}
 }
@@ -757,16 +852,16 @@ func (g *Gui) updateCollectionsView(v *gocui.View) {
 func (g *Gui) updateTreeView(v *gocui.View) {
 	v.Clear()
 
-	// Enable highlight when this view is focused
-	v.Highlight = g.currentColumn == "tree" && len(g.treeNodes) > 0
+	filtered := g.getFilteredTreeNodes()
 
-	if len(g.treeNodes) == 0 {
-		// fmt.Fprintln(v, "\033[90m Select a collection\033[0m")
-		// fmt.Fprintln(v, "\033[90m and press Space\033[0m")
+	// Enable highlight when this view is focused
+	v.Highlight = g.currentColumn == "tree" && len(filtered) > 0
+
+	if len(filtered) == 0 {
 		return
 	}
 
-	for _, node := range g.treeNodes {
+	for _, node := range filtered {
 		// Build indentation
 		indent := strings.Repeat("  ", node.Depth)
 
@@ -800,7 +895,11 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 	}
 
 	// Handle scrolling and set cursor for highlight
-	if len(g.treeNodes) > 0 {
+	if len(filtered) > 0 {
+		// Clamp selection to filtered list
+		if g.selectedTreeIdx >= len(filtered) {
+			g.selectedTreeIdx = len(filtered) - 1
+		}
 		v.FocusPoint(0, g.selectedTreeIdx, true)
 	}
 }
@@ -808,6 +907,13 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 func (g *Gui) updateDetailsView(v *gocui.View) {
 	// Show document data if available (highest priority)
 	if g.currentDocData != nil {
+		// When filtering details, always re-render to apply filter
+		detailsFilter := g.getDetailsFilter()
+		if detailsFilter != "" {
+			g.renderFilteredDetails(v)
+			return
+		}
+
 		// Use cached content if document hasn't changed
 		if g.cachedDetailsDocPath == g.currentDocPath && g.cachedDetailsContent != "" {
 			v.SetContent(g.cachedDetailsContent)
@@ -857,12 +963,13 @@ func (g *Gui) updateDetailsView(v *gocui.View) {
 }
 
 func (g *Gui) showProjectDetails(v *gocui.View) {
-	if len(g.projects) == 0 || g.selectedProjectIndex >= len(g.projects) {
+	filtered := g.getFilteredProjects()
+	if len(filtered) == 0 || g.selectedProjectIndex >= len(filtered) {
 		g.showWelcome(v)
 		return
 	}
 
-	project := g.projects[g.selectedProjectIndex]
+	project := filtered[g.selectedProjectIndex]
 
 	fmt.Fprintln(v, "\033[36m─── Project Info ───\033[0m")
 	fmt.Fprintln(v, "")
@@ -909,7 +1016,8 @@ func (g *Gui) showFetchedProjectDetails(v *gocui.View) {
 }
 
 func (g *Gui) showCollectionDetails(v *gocui.View) {
-	if len(g.collections) == 0 || g.selectedCollectionIdx >= len(g.collections) {
+	filtered := g.getFilteredCollections()
+	if len(filtered) == 0 || g.selectedCollectionIdx >= len(filtered) {
 		fmt.Fprintln(v, "\033[36m─── Collections ───\033[0m")
 		fmt.Fprintln(v, "")
 		fmt.Fprintln(v, "\033[90m  No collections found\033[0m")
@@ -918,7 +1026,7 @@ func (g *Gui) showCollectionDetails(v *gocui.View) {
 		return
 	}
 
-	collection := g.collections[g.selectedCollectionIdx]
+	collection := filtered[g.selectedCollectionIdx]
 
 	fmt.Fprintln(v, "\033[36m─── Collection Info ───\033[0m")
 	fmt.Fprintln(v, "")
@@ -929,7 +1037,8 @@ func (g *Gui) showCollectionDetails(v *gocui.View) {
 }
 
 func (g *Gui) showTreeNodeDetails(v *gocui.View) {
-	if len(g.treeNodes) == 0 || g.selectedTreeIdx >= len(g.treeNodes) {
+	filtered := g.getFilteredTreeNodes()
+	if len(filtered) == 0 || g.selectedTreeIdx >= len(filtered) {
 		fmt.Fprintln(v, "\033[36m─── Tree ───\033[0m")
 		fmt.Fprintln(v, "")
 		fmt.Fprintln(v, "\033[90m  No documents loaded\033[0m")
@@ -938,7 +1047,7 @@ func (g *Gui) showTreeNodeDetails(v *gocui.View) {
 		return
 	}
 
-	node := g.treeNodes[g.selectedTreeIdx]
+	node := filtered[g.selectedTreeIdx]
 
 	fmt.Fprintln(v, "\033[36m─── Node Info ───\033[0m")
 	fmt.Fprintln(v, "")
@@ -1008,12 +1117,29 @@ func (g *Gui) updateCommandsView(v *gocui.View) {
 
 func (g *Gui) updateHelpView(v *gocui.View) {
 	v.Clear()
-	helpText := " \033[36m←/→\033[0m cols  \033[36mj/k\033[0m move  \033[33mspace\033[0m select  \033[32mc\033[0m copy  \033[32ms\033[0m save  \033[35m?\033[0m help  \033[31mq\033[0m quit"
+
+	// Show filter input when typing
+	if g.filterInputActive {
+		panelName := g.getPanelNameFor(g.filterInputPanel)
+		filterPrompt := fmt.Sprintf(" \033[33mFilter %s:\033[0m %s\033[7m \033[0m", panelName, g.filterInputText)
+		hints := "  \033[90m(Enter to select, Esc to cancel)\033[0m"
+		fmt.Fprintf(v, "%s%s", filterPrompt, hints)
+		return
+	}
+
+	// Show filter status when panel has committed filter
+	if filter := g.getFilterForPanel(g.currentColumn); filter != "" {
+		panelName := g.getPanelNameFor(g.currentColumn)
+		fmt.Fprintf(v, " \033[33m%s filtered:\033[0m '%s'  \033[90m(Esc to clear filter)\033[0m", panelName, filter)
+		return
+	}
+
+	helpText := " \033[36m←/→\033[0m cols  \033[36mj/k\033[0m move  \033[33mspace\033[0m select  \033[32mc\033[0m copy  \033[32ms\033[0m save  \033[35m/\033[0m filter  \033[35m?\033[0m help  \033[31mq\033[0m quit"
 	versionText := fmt.Sprintf("\033[90mv%s\033[0m ", g.version)
 
 	// Calculate padding to right-align version
 	width, _ := v.Size()
-	helpLen := 75 // Approximate visible length without ANSI codes
+	helpLen := 85 // Approximate visible length without ANSI codes
 	versionLen := len(g.version) + 2
 	padding := width - helpLen - versionLen
 	if padding < 1 {
@@ -1105,6 +1231,27 @@ func (g *Gui) setKeybindings() error {
 		return err
 	}
 
+	// / to start filter
+	if err := g.g.SetKeybinding("", '/', gocui.ModNone, g.startFilter); err != nil {
+		return err
+	}
+
+	// Backspace for filter input
+	if err := g.g.SetKeybinding("", gocui.KeyBackspace, gocui.ModNone, g.handleFilterBackspace); err != nil {
+		return err
+	}
+	if err := g.g.SetKeybinding("", gocui.KeyBackspace2, gocui.ModNone, g.handleFilterBackspace); err != nil {
+		return err
+	}
+
+	// Set up filter character input handlers (when in filter mode, these add to filter text)
+	for _, ch := range "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_. " {
+		ch := ch // capture for closure
+		if err := g.g.SetKeybinding("", ch, gocui.ModNone, g.makeFilterCharHandler(ch)); err != nil {
+			return err
+		}
+	}
+
 	// Mouse click bindings for each panel
 	if err := g.g.SetKeybinding(g.views.helpModal, gocui.MouseLeft, gocui.ModNone, g.handleHelpClick); err != nil {
 		return err
@@ -1136,6 +1283,9 @@ func (g *Gui) setKeybindings() error {
 
 // Event handlers
 func (g *Gui) quit(gui *gocui.Gui, v *gocui.View) error {
+	if g.filterInputActive {
+		return g.addFilterChar(gui, 'q')
+	}
 	return gocui.ErrQuit
 }
 
@@ -1149,6 +1299,9 @@ func (g *Gui) setFocus(gui *gocui.Gui, column string) error {
 }
 
 func (g *Gui) columnLeft(gui *gocui.Gui, v *gocui.View) error {
+	if g.filterInputActive {
+		return g.addFilterChar(gui, 'h')
+	}
 	// Left goes up: details → tree → collections → projects → details (wrap)
 	var newColumn string
 	switch g.currentColumn {
@@ -1168,6 +1321,9 @@ func (g *Gui) columnLeft(gui *gocui.Gui, v *gocui.View) error {
 }
 
 func (g *Gui) columnRight(gui *gocui.Gui, v *gocui.View) error {
+	if g.filterInputActive {
+		return g.addFilterChar(gui, 'l')
+	}
 	// Right goes down: projects → collections → tree → details → projects (wrap)
 	var newColumn string
 	switch g.currentColumn {
@@ -1187,6 +1343,9 @@ func (g *Gui) columnRight(gui *gocui.Gui, v *gocui.View) error {
 }
 
 func (g *Gui) nextColumn(gui *gocui.Gui, v *gocui.View) error {
+	if g.filterInputActive {
+		return nil
+	}
 	var newColumn string
 	switch g.currentColumn {
 	case "projects":
@@ -1205,6 +1364,9 @@ func (g *Gui) nextColumn(gui *gocui.Gui, v *gocui.View) error {
 }
 
 func (g *Gui) cursorDown(gui *gocui.Gui, v *gocui.View) error {
+	if g.filterInputActive {
+		return g.addFilterChar(gui, 'j')
+	}
 	// Handle help modal scrolling
 	if g.helpOpen && g.helpPopup != nil {
 		g.helpPopup.MoveDown()
@@ -1213,16 +1375,19 @@ func (g *Gui) cursorDown(gui *gocui.Gui, v *gocui.View) error {
 
 	switch g.currentColumn {
 	case "projects":
-		if g.selectedProjectIndex < len(g.projects)-1 {
+		filtered := g.getFilteredProjects()
+		if g.selectedProjectIndex < len(filtered)-1 {
 			g.selectedProjectIndex++
 			g.currentProjectInfo = nil // Clear details when changing selection
 		}
 	case "collections":
-		if g.selectedCollectionIdx < len(g.collections)-1 {
+		filtered := g.getFilteredCollections()
+		if g.selectedCollectionIdx < len(filtered)-1 {
 			g.selectedCollectionIdx++
 		}
 	case "tree":
-		if g.selectedTreeIdx < len(g.treeNodes)-1 {
+		filtered := g.getFilteredTreeNodes()
+		if g.selectedTreeIdx < len(filtered)-1 {
 			g.selectedTreeIdx++
 		}
 	case "details":
@@ -1232,6 +1397,9 @@ func (g *Gui) cursorDown(gui *gocui.Gui, v *gocui.View) error {
 }
 
 func (g *Gui) cursorUp(gui *gocui.Gui, v *gocui.View) error {
+	if g.filterInputActive {
+		return g.addFilterChar(gui, 'k')
+	}
 	// Handle help modal scrolling
 	if g.helpOpen && g.helpPopup != nil {
 		g.helpPopup.MoveUp()
@@ -1261,6 +1429,9 @@ func (g *Gui) cursorUp(gui *gocui.Gui, v *gocui.View) error {
 }
 
 func (g *Gui) copyJSON(gui *gocui.Gui, v *gocui.View) error {
+	if g.filterInputActive {
+		return g.addFilterChar(gui, 'c')
+	}
 	docData, docPath, err := g.getDocumentToCopy()
 	if err != nil {
 		g.logCommand("copy", err.Error(), "error")
@@ -1296,6 +1467,9 @@ func (g *Gui) copyJSON(gui *gocui.Gui, v *gocui.View) error {
 }
 
 func (g *Gui) saveJSON(gui *gocui.Gui, v *gocui.View) error {
+	if g.filterInputActive {
+		return g.addFilterChar(gui, 's')
+	}
 	docData, docPath, err := g.getDocumentToCopy()
 	if err != nil {
 		g.logCommand("save", err.Error(), "error")
@@ -1331,8 +1505,9 @@ func (g *Gui) saveJSON(gui *gocui.Gui, v *gocui.View) error {
 // Otherwise returns the currently displayed document.
 func (g *Gui) getDocumentToCopy() (map[string]interface{}, string, error) {
 	// If on tree panel with a document node selected, fetch that document
-	if g.currentColumn == "tree" && len(g.treeNodes) > 0 && g.selectedTreeIdx < len(g.treeNodes) {
-		node := g.treeNodes[g.selectedTreeIdx]
+	filtered := g.getFilteredTreeNodes()
+	if g.currentColumn == "tree" && len(filtered) > 0 && g.selectedTreeIdx < len(filtered) {
+		node := filtered[g.selectedTreeIdx]
 		if node.Type == "document" {
 			// Fetch the document
 			doc, err := g.firebaseClient.GetDocument(node.Path)
@@ -1356,6 +1531,11 @@ func (g *Gui) getDocumentToCopy() (map[string]interface{}, string, error) {
 }
 
 func (g *Gui) handleSpace(gui *gocui.Gui, v *gocui.View) error {
+	if g.filterInputActive {
+		// Add space to filter text
+		g.filterInputText += " "
+		return g.Layout(gui)
+	}
 	switch g.currentColumn {
 	case "projects":
 		return g.selectProject(gui)
@@ -1368,6 +1548,11 @@ func (g *Gui) handleSpace(gui *gocui.Gui, v *gocui.View) error {
 }
 
 func (g *Gui) handleEnter(gui *gocui.Gui, v *gocui.View) error {
+	// Commit filter if in filter input mode
+	if g.filterInputActive {
+		return g.commitFilter(gui)
+	}
+
 	// Handle help popup action execution
 	if g.helpOpen && g.helpPopup != nil {
 		item := g.helpPopup.GetSelectedItem()
@@ -1387,11 +1572,12 @@ func (g *Gui) handleEnter(gui *gocui.Gui, v *gocui.View) error {
 }
 
 func (g *Gui) fetchProjectDetails(gui *gocui.Gui) error {
-	if g.selectedProjectIndex >= len(g.projects) {
+	filtered := g.getFilteredProjects()
+	if g.selectedProjectIndex >= len(filtered) {
 		return nil
 	}
 
-	project := g.projects[g.selectedProjectIndex]
+	project := filtered[g.selectedProjectIndex]
 	g.logCommand("api", fmt.Sprintf("GetProjectDetails(%s)...", project.ID), "running")
 
 	go func() {
@@ -1412,11 +1598,12 @@ func (g *Gui) fetchProjectDetails(gui *gocui.Gui) error {
 }
 
 func (g *Gui) selectProject(gui *gocui.Gui) error {
-	if g.selectedProjectIndex >= len(g.projects) {
+	filtered := g.getFilteredProjects()
+	if g.selectedProjectIndex >= len(filtered) {
 		return nil
 	}
 
-	selectedProject := g.projects[g.selectedProjectIndex]
+	selectedProject := filtered[g.selectedProjectIndex]
 
 	// Show loading state immediately
 	g.logCommand("api", fmt.Sprintf("ListCollections(%s) loading...", selectedProject.ID), "running")
@@ -1460,11 +1647,12 @@ func (g *Gui) selectProject(gui *gocui.Gui) error {
 }
 
 func (g *Gui) selectCollection(gui *gocui.Gui) error {
-	if g.selectedCollectionIdx >= len(g.collections) {
+	filtered := g.getFilteredCollections()
+	if g.selectedCollectionIdx >= len(filtered) {
 		return nil
 	}
 
-	collection := g.collections[g.selectedCollectionIdx]
+	collection := filtered[g.selectedCollectionIdx]
 	g.currentCollection = collection.Name
 
 	// Show loading state immediately
@@ -1508,16 +1696,25 @@ func (g *Gui) selectCollection(gui *gocui.Gui) error {
 }
 
 func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
-	if g.selectedTreeIdx >= len(g.treeNodes) {
+	filtered := g.getFilteredTreeNodes()
+	if g.selectedTreeIdx >= len(filtered) {
 		return nil
 	}
 
-	node := &g.treeNodes[g.selectedTreeIdx]
-	nodeIdx := g.selectedTreeIdx
-	nodePath := node.Path
-	nodeName := node.Name
-	nodeDepth := node.Depth
-	nodeType := node.Type
+	// Get node from filtered list
+	selectedNode := filtered[g.selectedTreeIdx]
+	nodePath := selectedNode.Path
+	nodeName := selectedNode.Name
+	nodeDepth := selectedNode.Depth
+	nodeType := selectedNode.Type
+
+	// Find original index for modifications
+	originalIdx := g.getOriginalTreeNodeIndex(g.selectedTreeIdx)
+	if originalIdx == -1 {
+		return nil
+	}
+	node := &g.treeNodes[originalIdx]
+	nodeIdx := originalIdx
 
 	if nodeType == "document" {
 		if node.Expanded {
@@ -1665,7 +1862,7 @@ func (g *Gui) collapseNode(idx int) {
 }
 
 func (g *Gui) handleEscape(gui *gocui.Gui, v *gocui.View) error {
-	// Close help modal if open
+	// Close help modal if open (first priority)
 	if g.helpOpen {
 		g.helpOpen = false
 		g.helpPopup = nil
@@ -1676,6 +1873,16 @@ func (g *Gui) handleEscape(gui *gocui.Gui, v *gocui.View) error {
 	if g.modalOpen {
 		g.modalOpen = false
 		return nil
+	}
+
+	// Cancel filter input if typing
+	if g.filterInputActive {
+		return g.cancelFilterInput(gui)
+	}
+
+	// Clear committed filter for current panel if it has one
+	if g.hasActiveFilter(g.currentColumn) {
+		return g.clearCurrentFilter(gui)
 	}
 
 	// Collapse currently selected tree node if expanded
@@ -1689,16 +1896,21 @@ func (g *Gui) handleEscape(gui *gocui.Gui, v *gocui.View) error {
 		}
 	}
 
-	// Otherwise go back a column
-	return g.columnLeft(gui, v)
+	return nil
 }
 
 func (g *Gui) toggleModal(gui *gocui.Gui, v *gocui.View) error {
+	if g.filterInputActive {
+		return nil
+	}
 	g.modalOpen = !g.modalOpen
 	return g.Layout(gui)
 }
 
 func (g *Gui) toggleHelp(gui *gocui.Gui, v *gocui.View) error {
+	if g.filterInputActive {
+		return nil
+	}
 	g.helpOpen = !g.helpOpen
 	if g.helpOpen {
 		g.helpPopup = g.buildHelpPopup()
@@ -1715,6 +1927,7 @@ func (g *Gui) buildHelpPopup() *Popup {
 		{Key: "←/→ h/l", Label: "Switch panels", Action: nil},
 		{Key: "↑/↓ j/k", Label: "Move up/down", Action: nil},
 		{Key: "Space", Label: "Select / Expand", Action: g.handleSpace},
+		{Key: "/", Label: "Filter / Search", Action: g.startFilter},
 		{Key: "Esc", Label: "Back / Collapse / Close", Action: g.handleEscape},
 		{Key: "r", Label: "Refresh", Action: g.refresh},
 		{Key: "@", Label: "Command log", Action: g.toggleModal},
@@ -1784,7 +1997,11 @@ func (g *Gui) renderHelpContent(v *gocui.View) {
 }
 
 func (g *Gui) getPanelName() string {
-	switch g.currentColumn {
+	return g.getPanelNameFor(g.currentColumn)
+}
+
+func (g *Gui) getPanelNameFor(panel string) string {
+	switch panel {
 	case "projects":
 		return "Projects"
 	case "collections":
@@ -1794,11 +2011,14 @@ func (g *Gui) getPanelName() string {
 	case "details":
 		return "Details"
 	default:
-		return "Current Panel"
+		return "Panel"
 	}
 }
 
 func (g *Gui) refresh(gui *gocui.Gui, v *gocui.View) error {
+	if g.filterInputActive {
+		return g.addFilterChar(gui, 'r')
+	}
 	g.logCommand("r", "Refreshing...", "running")
 
 	// Reload projects
@@ -1855,7 +2075,8 @@ func (g *Gui) handleProjectsClick(gui *gocui.Gui, v *gocui.View) error {
 	_, oy := v.Origin()
 	clickedLine := cy + oy
 
-	if clickedLine >= 0 && clickedLine < len(g.projects) {
+	filtered := g.getFilteredProjects()
+	if clickedLine >= 0 && clickedLine < len(filtered) {
 		g.selectedProjectIndex = clickedLine
 		g.currentProjectInfo = nil
 	}
@@ -1877,7 +2098,8 @@ func (g *Gui) handleCollectionsClick(gui *gocui.Gui, v *gocui.View) error {
 	_, oy := v.Origin()
 	clickedLine := cy + oy
 
-	if clickedLine >= 0 && clickedLine < len(g.collections) {
+	filtered := g.getFilteredCollections()
+	if clickedLine >= 0 && clickedLine < len(filtered) {
 		g.selectedCollectionIdx = clickedLine
 	}
 
@@ -1898,7 +2120,8 @@ func (g *Gui) handleTreeClick(gui *gocui.Gui, v *gocui.View) error {
 	_, oy := v.Origin()
 	clickedLine := cy + oy
 
-	if clickedLine >= 0 && clickedLine < len(g.treeNodes) {
+	filtered := g.getFilteredTreeNodes()
+	if clickedLine >= 0 && clickedLine < len(filtered) {
 		g.selectedTreeIdx = clickedLine
 	}
 
@@ -1925,4 +2148,244 @@ func (g *Gui) handleOutsideClick(gui *gocui.Gui, v *gocui.View) error {
 		return g.Layout(gui)
 	}
 	return nil
+}
+
+// Filter functions
+
+func (g *Gui) startFilter(gui *gocui.Gui, v *gocui.View) error {
+	// Don't start filter if modal/help is open or already typing filter
+	if g.helpOpen || g.modalOpen || g.filterInputActive {
+		return nil
+	}
+	// Clear any existing committed filter for this panel
+	switch g.currentColumn {
+	case "projects":
+		g.projectsFilter = ""
+	case "collections":
+		g.collectionsFilter = ""
+	case "tree":
+		g.treeFilter = ""
+	case "details":
+		g.detailsFilter = ""
+	}
+	g.filterInputActive = true
+	g.filterInputPanel = g.currentColumn
+	g.filterInputText = ""
+	return g.Layout(gui)
+}
+
+func (g *Gui) commitFilter(gui *gocui.Gui) error {
+	filterText := g.filterInputText
+	panel := g.filterInputPanel
+
+	// Save filter and exit input mode (filter stays active)
+	switch panel {
+	case "projects":
+		g.projectsFilter = filterText
+		g.selectedProjectIndex = 0 // Reset to first filtered item
+	case "collections":
+		g.collectionsFilter = filterText
+		g.selectedCollectionIdx = 0
+	case "tree":
+		g.treeFilter = filterText
+		g.selectedTreeIdx = 0
+	case "details":
+		g.detailsFilter = filterText
+		g.detailsScrollPos = 0
+	}
+
+	// Exit input mode but keep filter active
+	g.filterInputActive = false
+	g.filterInputText = ""
+	g.filterInputPanel = ""
+
+	return g.Layout(gui)
+}
+
+func (g *Gui) isFilteringPanel(panel string) bool {
+	return g.filterInputActive && g.filterInputPanel == panel
+}
+
+func (g *Gui) getFilterForPanel(panel string) string {
+	switch panel {
+	case "projects":
+		return g.projectsFilter
+	case "collections":
+		return g.collectionsFilter
+	case "tree":
+		return g.treeFilter
+	case "details":
+		return g.detailsFilter
+	}
+	return ""
+}
+
+func (g *Gui) hasActiveFilter(panel string) bool {
+	return g.getFilterForPanel(panel) != ""
+}
+
+func (g *Gui) clearCurrentFilter(gui *gocui.Gui) error {
+	switch g.currentColumn {
+	case "projects":
+		g.projectsFilter = ""
+		g.selectedProjectIndex = 0
+	case "collections":
+		g.collectionsFilter = ""
+		g.selectedCollectionIdx = 0
+	case "tree":
+		g.treeFilter = ""
+		g.selectedTreeIdx = 0
+	case "details":
+		g.detailsFilter = ""
+		g.detailsScrollPos = 0
+	}
+	return g.Layout(gui)
+}
+
+func (g *Gui) cancelFilterInput(gui *gocui.Gui) error {
+	g.filterInputActive = false
+	g.filterInputText = ""
+	g.filterInputPanel = ""
+	return g.Layout(gui)
+}
+
+func (g *Gui) handleFilterBackspace(gui *gocui.Gui, v *gocui.View) error {
+	if !g.filterInputActive {
+		return nil
+	}
+	if len(g.filterInputText) > 0 {
+		g.filterInputText = g.filterInputText[:len(g.filterInputText)-1]
+	}
+	return g.Layout(gui)
+}
+
+func (g *Gui) makeFilterCharHandler(ch rune) func(*gocui.Gui, *gocui.View) error {
+	return func(gui *gocui.Gui, v *gocui.View) error {
+		if !g.filterInputActive {
+			return nil // Let normal keybindings handle it
+		}
+		g.filterInputText += string(ch)
+		return g.Layout(gui)
+	}
+}
+
+// addFilterChar adds a character to the filter input and refreshes layout
+func (g *Gui) addFilterChar(gui *gocui.Gui, ch rune) error {
+	g.filterInputText += string(ch)
+	return g.Layout(gui)
+}
+
+// matchesFilter checks if text contains the filter string (case-insensitive)
+func (g *Gui) matchesFilter(text, filter string) bool {
+	if filter == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(text), strings.ToLower(filter))
+}
+
+// getFilteredProjects returns projects matching the current filter
+func (g *Gui) getFilteredProjects() []firebase.Project {
+	// Use input text while typing, otherwise use committed filter
+	filter := g.projectsFilter
+	if g.filterInputActive && g.filterInputPanel == "projects" {
+		filter = g.filterInputText
+	}
+	if filter == "" {
+		return g.projects
+	}
+	var filtered []firebase.Project
+	for _, p := range g.projects {
+		if g.matchesFilter(p.DisplayName, filter) || g.matchesFilter(p.ID, filter) {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
+}
+
+// getFilteredCollections returns collections matching the current filter
+func (g *Gui) getFilteredCollections() []firebase.Collection {
+	filter := g.collectionsFilter
+	if g.filterInputActive && g.filterInputPanel == "collections" {
+		filter = g.filterInputText
+	}
+	if filter == "" {
+		return g.collections
+	}
+	var filtered []firebase.Collection
+	for _, c := range g.collections {
+		if g.matchesFilter(c.Name, filter) {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
+}
+
+// getFilteredTreeNodes returns tree nodes matching the current filter
+func (g *Gui) getFilteredTreeNodes() []TreeNode {
+	filter := g.treeFilter
+	if g.filterInputActive && g.filterInputPanel == "tree" {
+		filter = g.filterInputText
+	}
+	if filter == "" {
+		return g.treeNodes
+	}
+	var filtered []TreeNode
+	for _, n := range g.treeNodes {
+		if g.matchesFilter(n.Name, filter) || g.matchesFilter(n.Path, filter) {
+			filtered = append(filtered, n)
+		}
+	}
+	return filtered
+}
+
+// getDetailsFilter returns the active filter for details panel
+func (g *Gui) getDetailsFilter() string {
+	if g.filterInputActive && g.filterInputPanel == "details" {
+		return g.filterInputText
+	}
+	return g.detailsFilter
+}
+
+// getOriginalTreeNodeIndex maps a filtered index back to the original treeNodes index
+func (g *Gui) getOriginalTreeNodeIndex(filteredIdx int) int {
+	filtered := g.getFilteredTreeNodes()
+	if filteredIdx < 0 || filteredIdx >= len(filtered) {
+		return -1
+	}
+	targetPath := filtered[filteredIdx].Path
+	for i, node := range g.treeNodes {
+		if node.Path == targetPath {
+			return i
+		}
+	}
+	return -1
+}
+
+// renderFilteredDetails shows only JSON lines that match the filter
+func (g *Gui) renderFilteredDetails(v *gocui.View) {
+	filter := g.getDetailsFilter()
+	data, err := json.MarshalIndent(g.currentDocData, "", "  ")
+	if err != nil {
+		v.SetContent(fmt.Sprintf("Error formatting data: %v\n", err))
+		return
+	}
+
+	var content strings.Builder
+	content.WriteString(fmt.Sprintf("\033[36m─── %s (filtered) ───\033[0m\n\n", g.currentDocPath))
+
+	lines := strings.Split(string(data), "\n")
+	matchCount := 0
+	for _, line := range lines {
+		if g.matchesFilter(line, filter) {
+			content.WriteString(colorizeLine(line))
+			content.WriteString("\n")
+			matchCount++
+		}
+	}
+
+	if matchCount == 0 {
+		content.WriteString("\033[90mNo matching lines\033[0m\n")
+	}
+
+	v.SetContent(content.String())
 }
