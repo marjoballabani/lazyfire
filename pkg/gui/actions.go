@@ -113,11 +113,18 @@ func (g *Gui) blockAction() error {
 	return nil
 }
 
-// Filter char inserters for vim keys
-func (g *Gui) filterInsertJ() error { return g.insertFilterChar(g.g, 'j') }
-func (g *Gui) filterInsertK() error { return g.insertFilterChar(g.g, 'k') }
-func (g *Gui) filterInsertH() error { return g.insertFilterChar(g.g, 'h') }
-func (g *Gui) filterInsertL() error { return g.insertFilterChar(g.g, 'l') }
+// Filter char inserters for keys that have other bindings
+func (g *Gui) filterInsertJ() error         { return g.insertFilterChar(g.g, 'j') }
+func (g *Gui) filterInsertK() error         { return g.insertFilterChar(g.g, 'k') }
+func (g *Gui) filterInsertH() error         { return g.insertFilterChar(g.g, 'h') }
+func (g *Gui) filterInsertL() error         { return g.insertFilterChar(g.g, 'l') }
+func (g *Gui) filterInsertQuestion() error  { return g.insertFilterChar(g.g, '?') }
+func (g *Gui) filterInsertAt() error        { return g.insertFilterChar(g.g, '@') }
+func (g *Gui) filterInsertC() error         { return g.insertFilterChar(g.g, 'c') }
+func (g *Gui) filterInsertS() error         { return g.insertFilterChar(g.g, 's') }
+func (g *Gui) filterInsertR() error         { return g.insertFilterChar(g.g, 'r') }
+func (g *Gui) filterInsertQ() error         { return g.insertFilterChar(g.g, 'q') }
+func (g *Gui) filterInsertSlash() error     { return g.insertFilterChar(g.g, '/') }
 
 // doColumnLeft switches to the panel on the left (skips details)
 func (g *Gui) doColumnLeft() error {

@@ -28,7 +28,7 @@ func (g *Gui) globalBindings(km *KeybindingManager) []*Binding {
 			Handler:     g.doQuit,
 			Description: "Quit",
 			Contexts: map[Context]func() error{
-				ContextFilter: g.blockAction,
+				ContextFilter: g.filterInsertQ,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
 			},
@@ -43,7 +43,7 @@ func (g *Gui) globalBindings(km *KeybindingManager) []*Binding {
 			Handler:     g.doToggleHelp,
 			Description: "Show help",
 			Contexts: map[Context]func() error{
-				ContextFilter: g.blockAction,
+				ContextFilter: g.filterInsertQuestion,
 			},
 		},
 		{
@@ -51,7 +51,7 @@ func (g *Gui) globalBindings(km *KeybindingManager) []*Binding {
 			Handler:     g.doToggleModal,
 			Description: "Command log",
 			Contexts: map[Context]func() error{
-				ContextFilter: g.blockAction,
+				ContextFilter: g.filterInsertAt,
 			},
 		},
 	}
@@ -184,8 +184,9 @@ func (g *Gui) filterBindings(km *KeybindingManager) []*Binding {
 			Handler:     g.doStartFilter,
 			Description: "Start filter",
 			Contexts: map[Context]func() error{
-				ContextHelp:  g.blockAction,
-				ContextModal: g.blockAction,
+				ContextFilter: g.filterInsertSlash,
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
 			},
 		},
 		{
@@ -198,9 +199,12 @@ func (g *Gui) filterBindings(km *KeybindingManager) []*Binding {
 		},
 	}
 
-	// Character handlers for filter input
-	for _, ch := range "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_. " {
-		ch := ch // capture
+	// Character handlers for filter input (includes jq syntax chars)
+	// Exclude chars that have dedicated context-aware bindings: hjkl, csrq, ?@/
+	filterChars := "abdefgimnoptuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	filterChars += "-_. "
+	filterChars += "[]|(){}:\"'`,<>=!+*^$#~;&%\\"
+	for _, ch := range filterChars {
 		bindings = append(bindings, &Binding{
 			Key:     ch,
 			Handler: g.makeFilterCharAction(ch),
@@ -218,7 +222,7 @@ func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
 			Handler:     g.doCopyJSON,
 			Description: "Copy JSON",
 			Contexts: map[Context]func() error{
-				ContextFilter: g.blockAction,
+				ContextFilter: g.filterInsertC,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
 			},
@@ -228,7 +232,7 @@ func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
 			Handler:     g.doSaveJSON,
 			Description: "Save JSON",
 			Contexts: map[Context]func() error{
-				ContextFilter: g.blockAction,
+				ContextFilter: g.filterInsertS,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
 			},
@@ -238,7 +242,7 @@ func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
 			Handler:     g.doRefresh,
 			Description: "Refresh",
 			Contexts: map[Context]func() error{
-				ContextFilter: g.blockAction,
+				ContextFilter: g.filterInsertR,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
 			},

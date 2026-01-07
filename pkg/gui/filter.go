@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/itchyny/gojq"
 	"github.com/jesseduffield/gocui"
 	"github.com/marjoballabani/lazyfire/pkg/firebase"
 )
@@ -230,8 +231,17 @@ func (g *Gui) getOriginalTreeNodeIndex(filteredIdx int) int {
 }
 
 // renderFilteredDetails shows only JSON lines that match the filter
+// If filter starts with "." it's treated as a jq query
 func (g *Gui) renderFilteredDetails(v *gocui.View) {
 	filter := g.getDetailsFilter()
+
+	// If filter starts with ".", treat as jq query
+	if strings.HasPrefix(filter, ".") {
+		g.renderJqFilteredDetails(v, filter)
+		return
+	}
+
+	// Otherwise, do line-based string matching
 	data, err := json.MarshalIndent(g.currentDocData, "", "  ")
 	if err != nil {
 		v.SetContent(fmt.Sprintf("Error formatting data: %v\n", err))
@@ -253,6 +263,52 @@ func (g *Gui) renderFilteredDetails(v *gocui.View) {
 
 	if matchCount == 0 {
 		content.WriteString("\033[90mNo matching lines\033[0m\n")
+	}
+
+	v.SetContent(content.String())
+}
+
+// renderJqFilteredDetails applies a jq query to the document
+func (g *Gui) renderJqFilteredDetails(v *gocui.View, query string) {
+	var content strings.Builder
+	content.WriteString(fmt.Sprintf("\033[36m─── %s (jq: %s) ───\033[0m\n\n", g.currentDocPath, query))
+
+	// Parse jq query
+	jqQuery, err := gojq.Parse(query)
+	if err != nil {
+		content.WriteString(fmt.Sprintf("\033[31mjq parse error: %v\033[0m\n", err))
+		v.SetContent(content.String())
+		return
+	}
+
+	// Run query
+	iter := jqQuery.Run(g.currentDocData)
+	hasResults := false
+
+	for {
+		result, ok := iter.Next()
+		if !ok {
+			break
+		}
+
+		if err, isErr := result.(error); isErr {
+			content.WriteString(fmt.Sprintf("\033[31mjq error: %v\033[0m\n", err))
+			break
+		}
+
+		hasResults = true
+		// Format result as JSON
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			content.WriteString(fmt.Sprintf("%v\n", result))
+		} else {
+			content.WriteString(colorizeJSON(string(data)))
+			content.WriteString("\n")
+		}
+	}
+
+	if !hasResults {
+		content.WriteString("\033[90mnull\033[0m\n")
 	}
 
 	v.SetContent(content.String())
