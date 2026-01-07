@@ -250,7 +250,7 @@ func NewGui(config *config.Config, firebaseClient *firebase.Client, version stri
 
 	// Configure gocui
 	g.Cursor = false
-	g.Mouse = false
+	g.Mouse = true
 	g.InputEsc = true
 	g.ShowListFooter = true // Show "X of Y" footer
 
@@ -1040,6 +1040,32 @@ func (g *Gui) setKeybindings() error {
 		return err
 	}
 
+	// Mouse click bindings for each panel
+	if err := g.g.SetKeybinding(g.views.helpModal, gocui.MouseLeft, gocui.ModNone, g.handleHelpClick); err != nil {
+		return err
+	}
+	if err := g.g.SetKeybinding(g.views.projects, gocui.MouseLeft, gocui.ModNone, g.handleProjectsClick); err != nil {
+		return err
+	}
+	if err := g.g.SetKeybinding(g.views.collections, gocui.MouseLeft, gocui.ModNone, g.handleCollectionsClick); err != nil {
+		return err
+	}
+	if err := g.g.SetKeybinding(g.views.tree, gocui.MouseLeft, gocui.ModNone, g.handleTreeClick); err != nil {
+		return err
+	}
+	if err := g.g.SetKeybinding(g.views.details, gocui.MouseLeft, gocui.ModNone, g.handleDetailsClick); err != nil {
+		return err
+	}
+	if err := g.g.SetKeybinding(g.views.commands, gocui.MouseLeft, gocui.ModNone, g.handleOutsideClick); err != nil {
+		return err
+	}
+	if err := g.g.SetKeybinding(g.views.help, gocui.MouseLeft, gocui.ModNone, g.handleOutsideClick); err != nil {
+		return err
+	}
+	if err := g.g.SetKeybinding(g.views.background, gocui.MouseLeft, gocui.ModNone, g.handleOutsideClick); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1726,4 +1752,112 @@ func (g *Gui) refresh(gui *gocui.Gui, v *gocui.View) error {
 
 	g.logCommand("r", "Refreshed", "success")
 	return g.Layout(gui)
+}
+
+// Mouse click handlers
+
+func (g *Gui) handleHelpClick(gui *gocui.Gui, v *gocui.View) error {
+	if g.helpPopup == nil {
+		return nil
+	}
+
+	_, cy := v.Cursor()
+	_, oy := v.Origin()
+	clickedLine := cy + oy
+
+	// Map clicked line to popup item index (accounting for the line content)
+	if clickedLine >= 0 && clickedLine < len(g.helpPopup.Items) {
+		item := &g.helpPopup.Items[clickedLine]
+		if !item.IsHeader {
+			g.helpPopup.SelectedIdx = clickedLine
+		}
+	}
+
+	return g.Layout(gui)
+}
+
+func (g *Gui) handleProjectsClick(gui *gocui.Gui, v *gocui.View) error {
+	// Close popup if open and ignore click
+	if g.helpOpen {
+		g.helpOpen = false
+		g.helpPopup = nil
+		return g.Layout(gui)
+	}
+
+	g.currentColumn = "projects"
+
+	_, cy := v.Cursor()
+	_, oy := v.Origin()
+	clickedLine := cy + oy
+
+	if clickedLine >= 0 && clickedLine < len(g.projects) {
+		g.selectedProjectIndex = clickedLine
+		g.currentProjectInfo = nil
+	}
+
+	return g.Layout(gui)
+}
+
+func (g *Gui) handleCollectionsClick(gui *gocui.Gui, v *gocui.View) error {
+	// Close popup if open and ignore click
+	if g.helpOpen {
+		g.helpOpen = false
+		g.helpPopup = nil
+		return g.Layout(gui)
+	}
+
+	g.currentColumn = "collections"
+
+	_, cy := v.Cursor()
+	_, oy := v.Origin()
+	clickedLine := cy + oy
+
+	if clickedLine >= 0 && clickedLine < len(g.collections) {
+		g.selectedCollectionIdx = clickedLine
+	}
+
+	return g.Layout(gui)
+}
+
+func (g *Gui) handleTreeClick(gui *gocui.Gui, v *gocui.View) error {
+	// Close popup if open and ignore click
+	if g.helpOpen {
+		g.helpOpen = false
+		g.helpPopup = nil
+		return g.Layout(gui)
+	}
+
+	g.currentColumn = "tree"
+
+	_, cy := v.Cursor()
+	_, oy := v.Origin()
+	clickedLine := cy + oy
+
+	if clickedLine >= 0 && clickedLine < len(g.treeNodes) {
+		g.selectedTreeIdx = clickedLine
+	}
+
+	return g.Layout(gui)
+}
+
+func (g *Gui) handleDetailsClick(gui *gocui.Gui, v *gocui.View) error {
+	// Close popup if open and ignore click
+	if g.helpOpen {
+		g.helpOpen = false
+		g.helpPopup = nil
+		return g.Layout(gui)
+	}
+
+	g.currentColumn = "details"
+	return g.Layout(gui)
+}
+
+func (g *Gui) handleOutsideClick(gui *gocui.Gui, v *gocui.View) error {
+	// Close popup if open
+	if g.helpOpen {
+		g.helpOpen = false
+		g.helpPopup = nil
+		return g.Layout(gui)
+	}
+	return nil
 }
