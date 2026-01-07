@@ -171,6 +171,10 @@ type Gui struct {
 	currentProjectInfo *firebase.ProjectDetails
 	detailsScrollPos   int
 
+	// Cached rendered content (avoid re-rendering on every Layout)
+	cachedDetailsContent string
+	cachedDetailsDocPath string
+
 	// Command execution tracking
 	commandHistory []CommandExecution
 
@@ -775,19 +779,36 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 }
 
 func (g *Gui) updateDetailsView(v *gocui.View) {
-	v.Clear()
-
 	// Show document data if available (highest priority)
 	if g.currentDocData != nil {
-		fmt.Fprintf(v, "\033[36m─── %s ───\033[0m\n\n", g.currentDocPath)
-		data, err := json.MarshalIndent(g.currentDocData, "", "  ")
-		if err != nil {
-			fmt.Fprintf(v, "Error formatting data: %v\n", err)
+		// Use cached content if document hasn't changed
+		if g.cachedDetailsDocPath == g.currentDocPath && g.cachedDetailsContent != "" {
+			v.SetContent(g.cachedDetailsContent)
 			return
 		}
-		fmt.Fprintln(v, colorizeJSON(string(data)))
+
+		// Render and cache the colorized JSON
+		data, err := json.MarshalIndent(g.currentDocData, "", "  ")
+		if err != nil {
+			v.SetContent(fmt.Sprintf("Error formatting data: %v\n", err))
+			return
+		}
+
+		var content strings.Builder
+		content.WriteString(fmt.Sprintf("\033[36m─── %s ───\033[0m\n\n", g.currentDocPath))
+		content.WriteString(colorizeJSON(string(data)))
+
+		g.cachedDetailsContent = content.String()
+		g.cachedDetailsDocPath = g.currentDocPath
+		v.SetContent(g.cachedDetailsContent)
 		return
 	}
+
+	// Clear cache when not showing document
+	g.cachedDetailsContent = ""
+	g.cachedDetailsDocPath = ""
+
+	v.Clear()
 
 	// Show fetched project details if available
 	if g.currentProjectInfo != nil && g.currentColumn == "projects" {
