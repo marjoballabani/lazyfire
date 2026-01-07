@@ -2,6 +2,9 @@
 # Copy to ~/.lazyfire/config.yaml
 
 ui:
+  # Nerd Fonts version for icons: "3" (default), "2" (older), or "" (disable icons)
+  nerdFontsVersion: "3"
+
   theme:
     # Supports: named colors (cyan, blue, red, green, yellow, magenta, white, black, default)
     #           hex colors (#ed8796)
@@ -41,3 +44,7 @@ ui:
 #       - "#8be9fd"
 #     selectedLineBgColor:
 #       - "#44475a"
+
+# Disable icons (for terminals without Nerd Fonts)
+# ui:
+#   nerdFontsVersion: ""

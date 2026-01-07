@@ -8,13 +8,16 @@ A terminal UI for browsing Firebase Firestore, inspired by [lazygit](https://git
 
 ## Features
 
-- 📂 Browse Firestore collections and documents
-- 🌳 Expandable tree view for nested subcollections
-- 📄 View document data as formatted JSON
-- ⌨️ Vim-style keybindings (h/j/k/l)
-- 🎨 Customizable theme (hex colors, 256-color, bold)
-- 🔐 Uses existing Firebase CLI authentication
-- 📐 Dynamic panel sizing (focused panel expands)
+- Browse Firestore collections and documents
+- Expandable tree view for nested subcollections
+- View document data as syntax-highlighted JSON
+- Vim-style keybindings (h/j/k/l)
+- Mouse support (click to select, navigate)
+- Customizable theme (hex colors, 256-color, bold)
+- Nerd Font icons (optional, with graceful fallback)
+- Uses existing Firebase CLI authentication
+- Dynamic panel sizing (focused panel expands)
+- Copy/save document JSON to clipboard or file
 
 ## Installation
 
@@ -100,7 +103,7 @@ Download pre-built binaries from the [releases page](https://github.com/marjobal
 | `l` `→` | Move to right panel |
 | `j` `↓` | Move down in list |
 | `k` `↑` | Move up in list |
-| `Enter` | View details (project info, resources) |
+| `Enter` | View details / Execute shortcut |
 | `Space` | Select / Expand |
 | `c` | Copy document JSON to clipboard |
 | `s` | Save document JSON to ~/Downloads |
@@ -110,12 +113,20 @@ Download pre-built binaries from the [releases page](https://github.com/marjobal
 | `@` | Show command history |
 | `q` | Quit |
 
+### Mouse
+
+- **Click** on any panel to focus and select item
+- **Click** outside popup to close it
+
 ## Configuration
 
 Create `~/.lazyfire/config.yaml`:
 
 ```yaml
 ui:
+  # Icons: "3" (Nerd Fonts v3), "2" (v2), or "" (disable)
+  nerdFontsVersion: "3"
+
   theme:
     activeBorderColor:
       - cyan
@@ -125,6 +136,20 @@ ui:
       - cyan
     selectedLineBgColor:
       - blue
+```
+
+### Icons
+
+LazyFire uses [Nerd Fonts](https://www.nerdfonts.com/) icons by default. If icons don't display correctly:
+
+```yaml
+# Use Nerd Fonts v2 (older version)
+ui:
+  nerdFontsVersion: "2"
+
+# Or disable icons entirely
+ui:
+  nerdFontsVersion: ""
 ```
 
 ### Color Options
@@ -160,6 +185,7 @@ ui:
 
 - Firebase CLI (`npm install -g firebase-tools`)
 - Terminal with true color support (recommended)
+- [Nerd Font](https://www.nerdfonts.com/) for icons (optional)
 - Go 1.21+ (only if building from source)
 
 ## Contributing

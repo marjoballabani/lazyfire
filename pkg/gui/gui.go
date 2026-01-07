@@ -15,6 +15,7 @@ import (
 	"github.com/jesseduffield/gocui"
 	"github.com/marjoballabani/lazyfire/pkg/config"
 	"github.com/marjoballabani/lazyfire/pkg/firebase"
+	"github.com/marjoballabani/lazyfire/pkg/gui/icons"
 )
 
 // ANSI color codes for JSON syntax highlighting
@@ -230,6 +231,17 @@ func NewGui(config *config.Config, firebaseClient *firebase.Client, version stri
 	// Create theme from config
 	theme := NewTheme(config.UI.Theme)
 
+	// Initialize icons based on config
+	switch config.UI.NerdFontsVersion {
+	case "2":
+		icons.PatchForNerdFontsV2()
+	case "3":
+		// Default v3 icons, nothing to do
+	default:
+		// Disable icons for graceful fallback
+		icons.SetEnabled(false)
+	}
+
 	gui := &Gui{
 		g:              g,
 		config:         config,
@@ -428,7 +440,7 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 		if !errors.Is(err, gocui.ErrUnknownView) {
 			return err
 		}
-		v.Title = "󰈸 Projects"
+		v.Title = " " + icons.PROJECT_ICON + " Projects "
 		v.TitleColor = g.theme.InactiveBorderColor
 		v.BgColor = gocui.ColorDefault
 		v.FgColor = gocui.ColorDefault
@@ -459,7 +471,7 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 		if !errors.Is(err, gocui.ErrUnknownView) {
 			return err
 		}
-		v.Title = " Collections"
+		v.Title = " " + icons.COLLECTION_ICON + " Collections "
 		v.TitleColor = g.theme.InactiveBorderColor
 		v.BgColor = gocui.ColorDefault
 		v.FgColor = gocui.ColorDefault
@@ -489,7 +501,7 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 		if !errors.Is(err, gocui.ErrUnknownView) {
 			return err
 		}
-		v.Title = "󰙅 Tree"
+		v.Title = " " + icons.TREE_ICON + " Tree "
 		v.TitleColor = g.theme.InactiveBorderColor
 		v.BgColor = gocui.ColorDefault
 		v.FgColor = gocui.ColorDefault
@@ -519,7 +531,7 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 		if !errors.Is(err, gocui.ErrUnknownView) {
 			return err
 		}
-		v.Title = "Details"
+		v.Title = " " + icons.DETAILS_ICON + " Details "
 		v.TitleColor = g.theme.InactiveBorderColor
 		v.Wrap = true
 		v.BgColor = gocui.ColorDefault
@@ -531,10 +543,10 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 
 	if v, err := gui.View(g.views.details); err == nil {
 		if g.currentColumn == "details" {
-			v.Title = "  Details (j/k scroll) "
+			v.Title = " " + icons.DETAILS_ICON + " Details (j/k scroll) "
 			v.TitleColor = g.theme.ActiveBorderColor
 		} else {
-			v.Title = "  Details "
+			v.Title = " " + icons.DETAILS_ICON + " Details "
 			v.TitleColor = g.theme.InactiveBorderColor
 		}
 		g.updateDetailsView(v)
@@ -546,7 +558,7 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 		if !errors.Is(err, gocui.ErrUnknownView) {
 			return err
 		}
-		v.Title = "  Commands "
+		v.Title = " " + icons.COMMAND_ICON + " Commands "
 		v.TitleColor = g.theme.InactiveBorderColor
 		v.BgColor = gocui.ColorDefault
 		v.FgColor = gocui.ColorDefault
@@ -589,7 +601,7 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 			if !errors.Is(err, gocui.ErrUnknownView) {
 				return err
 			}
-			v.Title = " Keyboard Shortcuts "
+			v.Title = " " + icons.KEYBOARD_ICON + " Keyboard Shortcuts "
 			v.TitleColor = g.theme.ActiveBorderColor
 			v.FrameColor = g.theme.ActiveBorderColor
 			v.FrameRunes = g.roundedFrameRunes
@@ -682,11 +694,17 @@ func (g *Gui) updateProjectsView(v *gocui.View) {
 	// Enable highlight when this view is focused
 	v.Highlight = g.currentColumn == "projects" && len(g.projects) > 0
 
+	// Project icon with spacing
+	icon := icons.PROJECT_ICON
+	if icon != "" {
+		icon = icon + " "
+	}
+
 	// When collapsed (not focused), show only the selected project
 	if g.currentColumn != "projects" {
 		if len(g.projects) > 0 && g.selectedProjectIndex < len(g.projects) {
 			project := g.projects[g.selectedProjectIndex]
-			fmt.Fprintf(v, "%s*\033[0m %s", g.getActiveColorCode(), project.DisplayName)
+			fmt.Fprintf(v, "%s*\033[0m %s%s", g.getActiveColorCode(), icon, project.DisplayName)
 		}
 		return
 	}
@@ -694,9 +712,9 @@ func (g *Gui) updateProjectsView(v *gocui.View) {
 	// Expanded view - show all projects
 	for _, project := range g.projects {
 		if project.ID == g.currentProject {
-			fmt.Fprintf(v, "%s*\033[0m %s\n", g.getActiveColorCode(), project.DisplayName)
+			fmt.Fprintf(v, "%s*\033[0m %s%s\n", g.getActiveColorCode(), icon, project.DisplayName)
 		} else {
-			fmt.Fprintf(v, "  %s\n", project.DisplayName)
+			fmt.Fprintf(v, "  %s%s\n", icon, project.DisplayName)
 		}
 	}
 
@@ -719,10 +737,14 @@ func (g *Gui) updateCollectionsView(v *gocui.View) {
 	}
 
 	for _, col := range g.collections {
+		icon := icons.COLLECTION_ICON
+		if icon != "" {
+			icon = icon + " "
+		}
 		if col.Name == g.currentCollection {
-			fmt.Fprintf(v, "%s*\033[0m %s\n", g.getActiveColorCode(), col.Name)
+			fmt.Fprintf(v, "%s*\033[0m %s%s\n", g.getActiveColorCode(), icon, col.Name)
 		} else {
-			fmt.Fprintf(v, "  %s\n", col.Name)
+			fmt.Fprintf(v, "  %s%s\n", icon, col.Name)
 		}
 	}
 
@@ -749,13 +771,18 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 		indent := strings.Repeat("  ", node.Depth)
 
 		// Choose icon based on type and expanded state
-		icon := "" // Document icon (nerd font)
+		icon := icons.DOCUMENT
 		if node.Type == "collection" {
 			if node.Expanded {
-				icon = "" // Open folder icon
+				icon = icons.FOLDER_OPEN
 			} else {
-				icon = "" // Closed folder icon
+				icon = icons.FOLDER_CLOSED
 			}
+		}
+
+		// Add spacing after icon if present
+		if icon != "" {
+			icon = icon + " "
 		}
 
 		// Tree connector
@@ -766,9 +793,9 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 
 		// Show colored * for currently selected document
 		if node.Path == g.currentDocPath {
-			fmt.Fprintf(v, "%s*%s%s%s%s %s\n", g.getActiveColorCode(), "\033[0m", indent, connector, icon, node.Name)
+			fmt.Fprintf(v, "%s*%s%s%s%s%s\n", g.getActiveColorCode(), "\033[0m", indent, connector, icon, node.Name)
 		} else {
-			fmt.Fprintf(v, " %s%s%s %s\n", indent, connector, icon, node.Name)
+			fmt.Fprintf(v, " %s%s%s%s\n", indent, connector, icon, node.Name)
 		}
 	}
 
@@ -941,7 +968,7 @@ func (g *Gui) showWelcome(v *gocui.View) {
 	fmt.Fprintln(v, "\033[33m       \\   |   /")
 	fmt.Fprintln(v, "\033[0m        \\__|__/")
 	fmt.Fprintln(v, "")
-	fmt.Fprintln(v, "\033[36m     L A Z Y F I R E\033[0m")
+	fmt.Fprintf(v, "\033[36m  %s  L A Z Y F I R E\033[0m\n", icons.FIREBASE_ICON)
 	fmt.Fprintln(v, "")
 	fmt.Fprintln(v, "\033[90m   Select a project to start\033[0m")
 }
@@ -959,13 +986,13 @@ func (g *Gui) updateCommandsView(v *gocui.View) {
 	var statusIcon, statusColor string
 	switch cmd.Status {
 	case "running":
-		statusIcon = "⏳"
+		statusIcon = icons.LOADING
 		statusColor = "\033[33m" // Yellow
 	case "error":
-		statusIcon = "✗"
+		statusIcon = icons.ERROR
 		statusColor = "\033[31m" // Red
 	case "success":
-		statusIcon = "✓"
+		statusIcon = icons.SUCCESS
 		statusColor = "\033[32m" // Green
 	default:
 		statusIcon = "•"
