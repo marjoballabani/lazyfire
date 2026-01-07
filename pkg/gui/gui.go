@@ -676,7 +676,19 @@ func (g *Gui) updateCommandsView(v *gocui.View) {
 
 func (g *Gui) updateHelpView(v *gocui.View) {
 	v.Clear()
-	fmt.Fprint(v, " \033[36m←/→\033[0m columns  \033[36mj/k\033[0m move  \033[33mspace\033[0m select  \033[33mEsc\033[0m back  \033[35mr\033[0m refresh  \033[31mq\033[0m quit")
+	helpText := " \033[36m←/→\033[0m columns  \033[36mj/k\033[0m move  \033[33mspace\033[0m select  \033[33mEsc\033[0m back  \033[35mr\033[0m refresh  \033[31mq\033[0m quit"
+	versionText := fmt.Sprintf("\033[90mv%s\033[0m ", g.version)
+
+	// Calculate padding to right-align version
+	width, _ := v.Size()
+	helpLen := 75 // Approximate visible length without ANSI codes
+	versionLen := len(g.version) + 2
+	padding := width - helpLen - versionLen
+	if padding < 1 {
+		padding = 1
+	}
+
+	fmt.Fprintf(v, "%s%*s%s", helpText, padding, "", versionText)
 }
 
 func (g *Gui) setKeybindings() error {

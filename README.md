@@ -18,6 +18,12 @@ A terminal UI for browsing Firebase Firestore, inspired by [lazygit](https://git
 
 ## Installation
 
+### Homebrew (macOS/Linux)
+
+```bash
+brew install mballabani/tap/lazyfire
+```
+
 ### From Source
 
 ```bash
@@ -31,6 +37,10 @@ go build -o lazyfire .
 ```bash
 go install github.com/mballabani/lazyfire@latest
 ```
+
+### Download Binary
+
+Download pre-built binaries from the [releases page](https://github.com/mballabani/lazyfire/releases).
 
 ## Prerequisites
 

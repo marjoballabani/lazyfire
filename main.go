@@ -26,6 +26,12 @@ var (
 )
 
 func main() {
+	// Handle --version flag
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Printf("lazyfire %s\n", version)
+		return
+	}
+
 	buildInfo := &app.BuildInfo{
 		Version: version,
 		Commit:  commit,
