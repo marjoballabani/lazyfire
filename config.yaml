@@ -1,0 +1,17 @@
+# UI Configuration
+ui:
+  showIcons: true
+  theme:
+    activeBorderColor:
+      - "#ed8796"
+      - bold
+    # Inactive panel border color
+    inactiveBorderColor:
+      - "#5f626b"
+    # Options/help text color
+    optionsTextColor:
+      - "#8aadf4"
+    # Selected row background color
+    selectedLineBgColor:
+      - "#494d64"
+      - bold

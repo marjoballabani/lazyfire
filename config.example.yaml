@@ -1,0 +1,43 @@
+# LazyFire Configuration
+# Copy to ~/.lazyfire/config.yaml
+
+ui:
+  theme:
+    # Supports: named colors (cyan, blue, red, green, yellow, magenta, white, black, default)
+    #           hex colors (#ed8796)
+    #           256-color numbers (0-255)
+    #           attributes: bold, underline, reverse
+    activeBorderColor:
+      - cyan
+    inactiveBorderColor:
+      - default
+    optionsTextColor:
+      - cyan
+    selectedLineBgColor:
+      - blue
+
+# Theme: Catppuccin Macchiato
+# ui:
+#   theme:
+#     activeBorderColor:
+#       - "#ed8796"
+#       - bold
+#     inactiveBorderColor:
+#       - "#5f626b"
+#     optionsTextColor:
+#       - "#8aadf4"
+#     selectedLineBgColor:
+#       - "#494d64"
+
+# Theme: Dracula
+# ui:
+#   theme:
+#     activeBorderColor:
+#       - "#ff79c6"
+#       - bold
+#     inactiveBorderColor:
+#       - "#6272a4"
+#     optionsTextColor:
+#       - "#8be9fd"
+#     selectedLineBgColor:
+#       - "#44475a"
