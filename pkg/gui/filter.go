@@ -10,29 +10,6 @@ import (
 	"github.com/marjoballabani/lazyfire/pkg/firebase"
 )
 
-func (g *Gui) startFilter(gui *gocui.Gui, v *gocui.View) error {
-	// Don't start filter if modal/help is open or already typing filter
-	if g.helpOpen || g.modalOpen || g.filterInputActive {
-		return nil
-	}
-	// Clear any existing committed filter for this panel
-	switch g.currentColumn {
-	case "projects":
-		g.projectsFilter = ""
-	case "collections":
-		g.collectionsFilter = ""
-	case "tree":
-		g.treeFilter = ""
-	case "details":
-		g.detailsFilter = ""
-	}
-	g.filterInputActive = true
-	g.filterInputPanel = g.currentColumn
-	g.filterInputText = ""
-	g.filterCursorPos = 0
-	return g.Layout(gui)
-}
-
 func (g *Gui) commitFilter(gui *gocui.Gui) error {
 	filterText := g.filterInputText
 	panel := g.filterInputPanel
@@ -108,32 +85,6 @@ func (g *Gui) cancelFilterInput(gui *gocui.Gui) error {
 	g.filterInputPanel = ""
 	g.filterCursorPos = 0
 	return g.Layout(gui)
-}
-
-func (g *Gui) handleFilterBackspace(gui *gocui.Gui, v *gocui.View) error {
-	if !g.filterInputActive {
-		return nil
-	}
-	if g.filterCursorPos > 0 && len(g.filterInputText) > 0 {
-		// Delete character before cursor
-		g.filterInputText = g.filterInputText[:g.filterCursorPos-1] + g.filterInputText[g.filterCursorPos:]
-		g.filterCursorPos--
-	}
-	return g.Layout(gui)
-}
-
-func (g *Gui) makeFilterCharHandler(ch rune) func(*gocui.Gui, *gocui.View) error {
-	return func(gui *gocui.Gui, v *gocui.View) error {
-		if !g.filterInputActive {
-			return nil // Let normal keybindings handle it
-		}
-		return g.insertFilterChar(gui, ch)
-	}
-}
-
-// addFilterChar adds a character to the filter input at cursor position
-func (g *Gui) addFilterChar(gui *gocui.Gui, ch rune) error {
-	return g.insertFilterChar(gui, ch)
 }
 
 // insertFilterChar inserts a character at the cursor position

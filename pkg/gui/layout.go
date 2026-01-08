@@ -317,7 +317,7 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 
 		return nil
 	} else {
-		gui.DeleteView(g.views.helpModal)
+		_ = gui.DeleteView(g.views.helpModal)
 	}
 
 	// Modal (centered popup for command logs)
@@ -368,7 +368,7 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 		return nil
 	} else {
 		// Delete modal if it exists
-		gui.DeleteView(g.views.modal)
+		_ = gui.DeleteView(g.views.modal)
 	}
 
 	// Set current view

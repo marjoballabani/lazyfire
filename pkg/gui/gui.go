@@ -326,11 +326,6 @@ func (g *Gui) clearDetailsCache() {
 	g.detailsScrollPos = 0
 }
 
-// markDetailsDirty marks the details view as needing refresh
-func (g *Gui) markDetailsDirty() {
-	g.detailsViewDirty = true
-}
-
 // getLoadingText returns formatted loading text with animated spinner
 func (g *Gui) getLoadingText(text string) string {
 	frame := atomic.LoadUint32(&g.spinnerFrame)

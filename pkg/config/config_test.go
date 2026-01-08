@@ -12,11 +12,7 @@ func TestLoadConfig(t *testing.T) {
 		t.Fatal("LoadConfig() returned nil config")
 	}
 
-	// Check that config has valid structure (values may come from local config)
-	if cfg.UI.NerdFontsVersion == "" {
-		// NerdFontsVersion can be empty (disabled) or "2" or "3"
-		// This is acceptable
-	}
+	// NerdFontsVersion can be empty (disabled), "2", or "3" - all valid
 
 	// Theme colors should be set (either from defaults or config file)
 	if len(cfg.UI.Theme.ActiveBorderColor) == 0 {

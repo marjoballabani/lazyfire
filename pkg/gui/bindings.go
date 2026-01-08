@@ -101,19 +101,6 @@ func (g *Gui) newDisabledReasons() DisabledReasons {
 	}
 }
 
-// require combines multiple disable-reason checks into one
-// Returns first non-empty reason, or empty string if all pass
-func require(checks ...func() string) func() string {
-	return func() string {
-		for _, check := range checks {
-			if reason := check(); reason != "" {
-				return reason
-			}
-		}
-		return ""
-	}
-}
-
 // getContext returns the current UI context
 func (g *Gui) getContext() Context {
 	if g.helpOpen {
