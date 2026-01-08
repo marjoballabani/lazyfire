@@ -10,6 +10,7 @@ const (
 	ContextFilter  Context = "filter"
 	ContextHelp    Context = "help"
 	ContextModal   Context = "modal"
+	ContextSelect  Context = "select" // Visual selection mode
 )
 
 // Binding represents a keybinding with context-aware handling
@@ -123,6 +124,9 @@ func (g *Gui) getContext() Context {
 	}
 	if g.filterInputActive {
 		return ContextFilter
+	}
+	if g.selectMode {
+		return ContextSelect
 	}
 	return ContextNormal
 }

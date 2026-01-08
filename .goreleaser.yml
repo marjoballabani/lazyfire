@@ -31,13 +31,22 @@ archives:
 checksum:
   name_template: 'checksums.txt'
 
+release:
+  footer: |
+    ---
+    **Full Changelog**: https://github.com/marjoballabani/lazyfire/blob/main/CHANGELOG.md
+
 changelog:
+  # Use CHANGELOG.md content if available, otherwise generate from commits
+  use: github-native
   sort: asc
   filters:
     exclude:
       - '^docs:'
       - '^test:'
       - '^chore:'
+      - 'Merge pull request'
+      - 'Merge branch'
 
 brews:
   - repository:

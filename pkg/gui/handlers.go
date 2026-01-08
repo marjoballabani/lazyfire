@@ -31,10 +31,12 @@ func (g *Gui) selectProject(gui *gocui.Gui) error {
 
 	selectedProject := filtered[g.selectedProjectIndex]
 	g.logCommand("api", fmt.Sprintf("ListCollections(%s) loading...", selectedProject.ID), "running")
+	g.collectionsLoading = true
 
 	go func() {
 		if err := g.firebaseClient.SetCurrentProject(selectedProject.ID); err != nil {
 			g.g.Update(func(gui *gocui.Gui) error {
+				g.collectionsLoading = false
 				g.logCommand("api", fmt.Sprintf("SetProject failed: %v", err), "error")
 				return nil
 			})
@@ -52,6 +54,7 @@ func (g *Gui) selectProject(gui *gocui.Gui) error {
 
 		if err := g.loadCollections(); err != nil {
 			g.g.Update(func(gui *gocui.Gui) error {
+				g.collectionsLoading = false
 				g.logCommand("api", fmt.Sprintf("ListCollections failed: %v", err), "error")
 				return nil
 			})
@@ -59,6 +62,7 @@ func (g *Gui) selectProject(gui *gocui.Gui) error {
 		}
 
 		g.g.Update(func(gui *gocui.Gui) error {
+			g.collectionsLoading = false
 			g.logCommand("api", fmt.Sprintf("ListCollections(%s) → %d collections", selectedProject.ID, len(g.collections)), "success")
 			return nil
 		})
@@ -76,11 +80,13 @@ func (g *Gui) selectCollection(gui *gocui.Gui) error {
 	collection := filtered[g.selectedCollectionIdx]
 	g.currentCollection = collection.Name
 	g.logCommand("api", fmt.Sprintf("ListDocuments(%s) loading...", collection.Name), "running")
+	g.treeLoading = true
 
 	go func() {
 		docs, err := g.firebaseClient.ListDocuments(collection.Name, 50)
 		if err != nil {
 			g.g.Update(func(gui *gocui.Gui) error {
+				g.treeLoading = false
 				g.logCommand("api", fmt.Sprintf("ListDocuments failed: %v", err), "error")
 				return nil
 			})
@@ -104,6 +110,7 @@ func (g *Gui) selectCollection(gui *gocui.Gui) error {
 			}
 
 			g.selectedTreeIdx = 0
+			g.treeLoading = false
 			g.logCommand("api", fmt.Sprintf("ListDocuments(%s) → %d docs", collection.Name, len(docs)), "success")
 			return nil
 		})
@@ -139,11 +146,13 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 		}
 
 		g.logCommand("api", fmt.Sprintf("GetDocument(%s) loading...", nodePath), "running")
+		g.detailsLoading = true
 
 		go func() {
 			doc, err := g.firebaseClient.GetDocument(nodePath)
 			if err != nil {
 				g.g.Update(func(gui *gocui.Gui) error {
+					g.detailsLoading = false
 					g.logCommand("api", fmt.Sprintf("GetDocument failed: %v", err), "error")
 					return nil
 				})
@@ -153,6 +162,7 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 			subcols, err := g.firebaseClient.ListSubcollections(nodePath)
 
 			g.g.Update(func(gui *gocui.Gui) error {
+				g.detailsLoading = false
 				g.currentDocPath = nodePath
 				g.currentDocData = doc.Data
 
@@ -321,6 +331,7 @@ func (g *Gui) buildHelpPopup() {
 		items = append(items,
 			PopupItem{Key: "Space", Label: "Expand / Collapse", Action: g.doSpace},
 			PopupItem{Key: "Enter", Label: "Open in details", Action: g.doEnter},
+			PopupItem{Key: "v", Label: "Select mode (multi-select)", Action: g.doToggleSelectMode},
 			PopupItem{Key: "c", Label: "Copy JSON to clipboard", Action: g.doCopyJSON},
 			PopupItem{Key: "s", Label: "Save JSON to Downloads", Action: g.doSaveJSON},
 		)

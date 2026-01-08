@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/jesseduffield/gocui"
 )
@@ -16,7 +17,7 @@ func (g *Gui) doQuit() error {
 
 // doEscape handles escape key - closes modals, cancels filter, returns from details
 func (g *Gui) doEscape() error {
-	// Priority: help popup > command modal > filter input > committed filter > details panel
+	// Priority: help popup > command modal > details panel > select mode (only in tree) > filter input > committed filter
 	if g.helpOpen {
 		g.helpOpen = false
 		g.helpPopup = nil
@@ -26,15 +27,23 @@ func (g *Gui) doEscape() error {
 		g.modalOpen = false
 		return g.Layout(g.g)
 	}
+	// Return from details to previous panel (keeps select mode)
+	if g.currentColumn == "details" {
+		target := g.previousColumn
+		if target == "" {
+			target = "tree"
+		}
+		return g.setFocus(g.g, target)
+	}
+	// Exit select mode only when in tree panel
+	if g.selectMode && g.currentColumn == "tree" {
+		return g.doExitSelectMode()
+	}
 	if g.filterInputActive {
 		return g.cancelFilterInput(g.g)
 	}
 	if g.hasActiveFilter(g.currentColumn) {
 		return g.clearCurrentFilter(g.g)
-	}
-	// Return from details to previous panel
-	if g.currentColumn == "details" && g.previousColumn != "" {
-		return g.setFocus(g.g, g.previousColumn)
 	}
 	return nil
 }
@@ -124,6 +133,7 @@ func (g *Gui) filterInsertC() error         { return g.insertFilterChar(g.g, 'c'
 func (g *Gui) filterInsertS() error         { return g.insertFilterChar(g.g, 's') }
 func (g *Gui) filterInsertR() error         { return g.insertFilterChar(g.g, 'r') }
 func (g *Gui) filterInsertQ() error         { return g.insertFilterChar(g.g, 'q') }
+func (g *Gui) filterInsertV() error         { return g.insertFilterChar(g.g, 'v') }
 func (g *Gui) filterInsertSlash() error     { return g.insertFilterChar(g.g, '/') }
 
 // doColumnLeft switches to the panel on the left (skips details)
@@ -243,6 +253,11 @@ func (g *Gui) doEnter() error {
 	case "projects":
 		return g.fetchProjectDetails(g.g)
 	case "tree":
+		// In select mode with docs already loaded, just go to details
+		if g.selectMode && g.currentDocData != nil {
+			g.previousColumn = g.currentColumn
+			return g.setFocus(g.g, "details")
+		}
 		// Select the node (loads document) then go to details
 		if err := g.selectTreeNode(g.g); err != nil {
 			return err
@@ -442,4 +457,135 @@ func (g *Gui) doOutsideClick() error {
 		return g.Layout(g.g)
 	}
 	return nil
+}
+
+// Select mode functions
+
+// doToggleSelectMode toggles visual selection mode in tree
+func (g *Gui) doToggleSelectMode() error {
+	if g.currentColumn != "tree" {
+		return nil
+	}
+	if g.selectMode {
+		// Exit select mode
+		g.selectMode = false
+		g.selectedDocs = make(map[int]bool)
+	} else {
+		// Enter select mode
+		g.selectMode = true
+		g.selectStartIdx = g.selectedTreeIdx
+		g.selectedDocs = make(map[int]bool)
+		// Select current item if it's a document
+		filtered := g.getFilteredTreeNodes()
+		if g.selectedTreeIdx < len(filtered) && filtered[g.selectedTreeIdx].Type == "document" {
+			g.selectedDocs[g.selectedTreeIdx] = true
+		}
+	}
+	return g.Layout(g.g)
+}
+
+// doExitSelectMode exits select mode without fetching
+func (g *Gui) doExitSelectMode() error {
+	g.selectMode = false
+	g.selectedDocs = make(map[int]bool)
+	return g.Layout(g.g)
+}
+
+// selectMoveDown moves down in select mode, extending selection
+func (g *Gui) selectMoveDown() error {
+	if !g.selectMode || g.currentColumn != "tree" {
+		return g.doCursorDown()
+	}
+	filtered := g.getFilteredTreeNodes()
+	if g.selectedTreeIdx < len(filtered)-1 {
+		g.selectedTreeIdx++
+		// Select if it's a document
+		if filtered[g.selectedTreeIdx].Type == "document" {
+			g.selectedDocs[g.selectedTreeIdx] = true
+		}
+	}
+	return g.Layout(g.g)
+}
+
+// selectMoveUp moves up in select mode, unselecting the item we leave
+func (g *Gui) selectMoveUp() error {
+	if !g.selectMode || g.currentColumn != "tree" {
+		return g.doCursorUp()
+	}
+	if g.selectedTreeIdx > 0 {
+		// Unselect the position we're leaving
+		delete(g.selectedDocs, g.selectedTreeIdx)
+		g.selectedTreeIdx--
+	}
+	return g.Layout(g.g)
+}
+
+// doFetchSelectedDocs fetches all selected documents in parallel
+func (g *Gui) doFetchSelectedDocs() error {
+	if !g.selectMode || len(g.selectedDocs) == 0 {
+		return g.doSpace()
+	}
+
+	filtered := g.getFilteredTreeNodes()
+
+	// Collect paths to fetch
+	var toFetch []string
+	for idx := range g.selectedDocs {
+		if idx < len(filtered) && filtered[idx].Type == "document" {
+			toFetch = append(toFetch, filtered[idx].Path)
+		}
+	}
+
+	if len(toFetch) == 0 {
+		return g.Layout(g.g)
+	}
+
+	g.logCommand("api", fmt.Sprintf("Fetching %d documents...", len(toFetch)), "running")
+
+	// Fetch documents in parallel
+	type result struct {
+		path string
+		data map[string]any
+		err  error
+	}
+
+	results := make([]result, len(toFetch))
+	var wg sync.WaitGroup
+
+	for i, path := range toFetch {
+		wg.Add(1)
+		go func(idx int, docPath string) {
+			defer wg.Done()
+			doc, err := g.firebaseClient.GetDocument(docPath)
+			if err != nil {
+				results[idx] = result{path: docPath, err: err}
+			} else {
+				results[idx] = result{path: docPath, data: doc.Data}
+			}
+		}(i, path)
+	}
+
+	wg.Wait()
+
+	// Combine results
+	combined := make(map[string]any)
+	var errorCount int
+	for _, r := range results {
+		if r.err != nil {
+			g.logCommand("api", fmt.Sprintf("Error fetching %s: %v", r.path, r.err), "error")
+			errorCount++
+		} else {
+			combined[r.path] = r.data
+		}
+	}
+
+	if len(combined) > 0 {
+		g.currentDocData = combined
+		g.currentDocPath = fmt.Sprintf("%d documents selected", len(combined))
+		g.clearDetailsCache()
+		g.logCommand("api", fmt.Sprintf("Fetched %d documents", len(combined)), "success")
+	}
+
+	// Stay in select mode - only Esc exits
+	return g.Layout(g.g)
 }

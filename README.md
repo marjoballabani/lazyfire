@@ -13,6 +13,8 @@ A terminal UI for browsing Firebase Firestore, inspired by [lazygit](https://git
 - View document data as syntax-highlighted JSON
 - Filter/search across all panels
 - **jq query support** for filtering JSON in details panel
+- **Visual select mode** for multi-document selection and parallel fetching
+- **Document stats** with Firestore limits validation (size, fields, depth)
 - Vim-style keybindings (h/j/k/l)
 - Mouse support (click to select, navigate)
 - Customizable theme (hex colors, 256-color, bold)
@@ -83,11 +85,12 @@ Download pre-built binaries from the [releases page](https://github.com/marjobal
 | `k` `↑` | Move up in list |
 | `Tab` | Go to details panel |
 | `Enter` | Open document in details / Fetch project info |
-| `Space` | Select / Expand / Collapse |
+| `Space` | Select / Expand / Collapse (fetch selected in select mode) |
+| `v` | Toggle select mode (tree panel) |
 | `/` | Filter current panel |
 | `c` | Copy JSON to clipboard (respects jq filter) |
 | `s` | Save JSON to ~/Downloads (respects jq filter) |
-| `Esc` | Back: close popup / cancel filter / clear filter / exit details |
+| `Esc` | Back: close popup / cancel filter / clear filter / exit select mode |
 | `r` | Refresh |
 | `?` | Show keyboard shortcuts |
 | `@` | Show command history |
@@ -185,11 +188,18 @@ ui:
 
 Contributions welcome! Please open an issue or PR.
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for a detailed list of changes.
+
 ## License
 
 MIT - see [LICENSE](LICENSE)
+
+Third-party licenses: [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES)
 
 ## Acknowledgments
 
 - [lazygit](https://github.com/jesseduffield/lazygit) - UI inspiration
 - [gocui](https://github.com/jesseduffield/gocui) - Terminal UI library
+- [gojq](https://github.com/itchyny/gojq) - Pure Go jq implementation

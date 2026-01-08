@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/jesseduffield/gocui"
@@ -9,6 +10,9 @@ import (
 	"github.com/marjoballabani/lazyfire/pkg/firebase"
 	"github.com/marjoballabani/lazyfire/pkg/gui/icons"
 )
+
+// Spinner frames for loading animation
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 type CommandExecution struct {
 	Timestamp   string
@@ -58,6 +62,9 @@ type Gui struct {
 	// Cached rendered content (avoid re-rendering on every Layout)
 	cachedDetailsContent string
 	cachedDetailsDocPath string
+	cachedDetailsLines   []string // Raw JSON lines for search
+	cachedDetailsHeader  string   // Header (path + stats)
+	detailsViewDirty     bool     // True when content needs to be pushed to view
 
 	// Command execution tracking
 	commandHistory []CommandExecution
@@ -85,8 +92,12 @@ type Gui struct {
 	helpPopup *Popup
 
 	// Loading state
-	isLoading   bool
-	loadingText string
+	isLoading          bool
+	loadingText        string
+	collectionsLoading bool
+	treeLoading        bool
+	detailsLoading     bool
+	spinnerFrame       uint32 // Current spinner animation frame
 
 	// Filter state
 	filterInputActive bool   // true when typing in filter bar
@@ -99,6 +110,11 @@ type Gui struct {
 	collectionsFilter string
 	treeFilter        string
 	detailsFilter     string
+
+	// Select mode (visual selection in tree)
+	selectMode     bool
+	selectedDocs   map[int]bool // indices of selected tree nodes
+	selectStartIdx int          // where selection started
 
 	// Frame styling
 	roundedFrameRunes []rune
@@ -147,6 +163,7 @@ func NewGui(config *config.Config, firebaseClient *firebase.Client, version stri
 		currentProject: firebaseClient.GetCurrentProject(),
 		currentColumn:  "projects",
 		expandedPaths:  make(map[string]bool),
+		selectedDocs:   make(map[int]bool),
 	}
 
 	// Set view names
@@ -220,6 +237,20 @@ func (g *Gui) logCommand(command, description, status string) {
 func (g *Gui) Run() error {
 	defer g.g.Close()
 
+	// Start spinner animation ticker
+	go func() {
+		ticker := time.NewTicker(80 * time.Millisecond)
+		defer ticker.Stop()
+		for range ticker.C {
+			atomic.AddUint32(&g.spinnerFrame, 1)
+			if g.isAnyLoading() {
+				g.g.Update(func(gui *gocui.Gui) error {
+					return nil
+				})
+			}
+		}
+	}()
+
 	// Load projects asynchronously after UI starts
 	go func() {
 		// Show auth status
@@ -279,4 +310,31 @@ func (g *Gui) loadCollections() error {
 	g.collections = collections
 	g.selectedCollectionIdx = 0
 	return nil
+}
+
+// clearDetailsCache clears all cached details content and resets scroll
+func (g *Gui) clearDetailsCache() {
+	g.cachedDetailsContent = ""
+	g.cachedDetailsDocPath = ""
+	g.cachedDetailsLines = nil
+	g.cachedDetailsHeader = ""
+	g.detailsViewDirty = true
+	g.detailsScrollPos = 0
+}
+
+// markDetailsDirty marks the details view as needing refresh
+func (g *Gui) markDetailsDirty() {
+	g.detailsViewDirty = true
+}
+
+// getLoadingText returns formatted loading text with animated spinner
+func (g *Gui) getLoadingText(text string) string {
+	frame := atomic.LoadUint32(&g.spinnerFrame)
+	spinner := spinnerFrames[frame%uint32(len(spinnerFrames))]
+	return fmt.Sprintf("\033[33m%s %s\033[0m", spinner, text)
+}
+
+// isAnyLoading returns true if any panel is currently loading
+func (g *Gui) isAnyLoading() bool {
+	return g.isLoading || g.collectionsLoading || g.treeLoading || g.detailsLoading
 }

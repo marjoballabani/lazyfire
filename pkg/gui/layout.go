@@ -391,6 +391,13 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 func (g *Gui) updateProjectsView(v *gocui.View) {
 	v.Clear()
 
+	// Show loading indicator when projects are being loaded
+	if g.isLoading && len(g.projects) == 0 {
+		v.Highlight = false
+		fmt.Fprint(v, g.getLoadingText("Loading projects..."))
+		return
+	}
+
 	filtered := g.getFilteredProjects()
 
 	// Enable highlight when this view is focused
@@ -433,6 +440,13 @@ func (g *Gui) updateProjectsView(v *gocui.View) {
 func (g *Gui) updateCollectionsView(v *gocui.View) {
 	v.Clear()
 
+	// Show loading indicator when collections are being loaded
+	if g.collectionsLoading {
+		v.Highlight = false
+		fmt.Fprint(v, g.getLoadingText("Loading collections..."))
+		return
+	}
+
 	filtered := g.getFilteredCollections()
 
 	// Enable highlight when this view is focused
@@ -467,6 +481,13 @@ func (g *Gui) updateCollectionsView(v *gocui.View) {
 func (g *Gui) updateTreeView(v *gocui.View) {
 	v.Clear()
 
+	// Show loading indicator when tree is being loaded
+	if g.treeLoading {
+		v.Highlight = false
+		fmt.Fprint(v, g.getLoadingText("Loading documents..."))
+		return
+	}
+
 	filtered := g.getFilteredTreeNodes()
 
 	// Enable highlight when this view is focused
@@ -476,7 +497,7 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 		return
 	}
 
-	for _, node := range filtered {
+	for i, node := range filtered {
 		// Build indentation
 		indent := strings.Repeat("  ", node.Depth)
 
@@ -501,11 +522,20 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 			connector = "└─"
 		}
 
-		// Show colored * for currently selected document
-		if node.Path == g.currentDocPath {
-			fmt.Fprintf(v, "%s*%s%s%s%s%s\n", g.getActiveColorCode(), "\033[0m", indent, connector, icon, node.Name)
+		// Determine marker: * for current doc, + for selected in select mode, space otherwise
+		marker := " "
+		isSelected := g.selectMode && g.selectedDocs[i]
+		if isSelected {
+			marker = "\033[30;43m+\033[0m" // Black on yellow background for selected
+		} else if node.Path == g.currentDocPath {
+			marker = g.getActiveColorCode() + "*" + "\033[0m"
+		}
+
+		// Highlight selected items in select mode
+		if isSelected {
+			fmt.Fprintf(v, "%s%s%s%s\033[33m%s\033[0m\n", marker, indent, connector, icon, node.Name)
 		} else {
-			fmt.Fprintf(v, " %s%s%s%s\n", indent, connector, icon, node.Name)
+			fmt.Fprintf(v, "%s%s%s%s%s\n", marker, indent, connector, icon, node.Name)
 		}
 	}
 
@@ -520,6 +550,13 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 }
 
 func (g *Gui) updateDetailsView(v *gocui.View) {
+	// Show loading indicator when details are being loaded
+	if g.detailsLoading {
+		v.Clear()
+		fmt.Fprint(v, g.getLoadingText("Loading document..."))
+		return
+	}
+
 	// Show document data if available (highest priority)
 	if g.currentDocData != nil {
 		// When filtering details, always re-render to apply filter
@@ -531,11 +568,18 @@ func (g *Gui) updateDetailsView(v *gocui.View) {
 
 		// Use cached content if document hasn't changed
 		if g.cachedDetailsDocPath == g.currentDocPath && g.cachedDetailsContent != "" {
-			v.SetContent(g.cachedDetailsContent)
+			// Only call SetContent if view is dirty (avoids expensive redraw)
+			if g.detailsViewDirty {
+				v.SetContent(g.cachedDetailsContent)
+				g.detailsViewDirty = false
+			}
 			return
 		}
 
-		// Render and cache the colorized JSON
+		// New document - reset scroll position
+		g.detailsScrollPos = 0
+
+		// Format JSON
 		data, err := json.MarshalIndent(g.currentDocData, "", "  ")
 		if err != nil {
 			v.SetContent(fmt.Sprintf("Error formatting data: %v\n", err))
@@ -543,18 +587,30 @@ func (g *Gui) updateDetailsView(v *gocui.View) {
 		}
 
 		var content strings.Builder
-		content.WriteString(fmt.Sprintf("\033[36m─── %s ───\033[0m\n\n", g.currentDocPath))
+		content.WriteString(fmt.Sprintf("\033[36m─── %s ───\033[0m\n", g.currentDocPath))
+
+		// Show stats for actual documents
+		if strings.Contains(g.currentDocPath, "/") {
+			stats := calculateDocStats(g.currentDocData, g.currentDocPath)
+			content.WriteString(formatDocStats(stats))
+			content.WriteString("\n")
+		}
+		content.WriteString("\n")
+
+		// Syntax highlighting with chroma
 		content.WriteString(colorizeJSON(string(data)))
 
+		g.cachedDetailsLines = strings.Split(string(data), "\n")
+		g.cachedDetailsHeader = ""
 		g.cachedDetailsContent = content.String()
 		g.cachedDetailsDocPath = g.currentDocPath
 		v.SetContent(g.cachedDetailsContent)
+		g.detailsViewDirty = false
 		return
 	}
 
 	// Clear cache when not showing document
-	g.cachedDetailsContent = ""
-	g.cachedDetailsDocPath = ""
+	g.clearDetailsCache()
 
 	v.Clear()
 
@@ -754,6 +810,13 @@ func (g *Gui) updateHelpView(v *gocui.View) {
 		return
 	}
 
+	// Show select mode status
+	if g.selectMode {
+		count := len(g.selectedDocs)
+		fmt.Fprintf(v, " \033[33m-- SELECT MODE --\033[0m  %d selected  \033[90m(j/k to extend, Space to fetch, Esc to cancel)\033[0m", count)
+		return
+	}
+
 	// Show filter status when panel has committed filter
 	if filter := g.getFilterForPanel(g.currentColumn); filter != "" {
 		panelName := g.getPanelNameFor(g.currentColumn)
@@ -774,4 +837,164 @@ func (g *Gui) updateHelpView(v *gocui.View) {
 	}
 
 	fmt.Fprintf(v, "%s%*s%s", helpText, padding, "", versionText)
+}
+
+// Firestore limits (https://firebase.google.com/docs/firestore/quotas)
+const (
+	maxDocSizeBytes    = 1048576         // 1 MiB
+	maxFieldCount      = 20000           // Due to 40k index entries limit (2 per field)
+	maxDepth           = 20              // Maximum depth of nested maps/arrays
+	maxFieldNameBytes  = 1500            // Maximum field name size
+	maxFieldValueBytes = 1048576 - 89    // 1 MiB - 89 bytes
+	maxDocNameBytes    = 6 * 1024        // 6 KiB for document path
+)
+
+// docStats holds document statistics
+type docStats struct {
+	sizeBytes       int
+	fieldCount      int
+	maxDepth        int
+	maxFieldName    int // longest field name in bytes
+	maxFieldValue   int // largest field value in bytes
+	docPathLen      int // document path length
+}
+
+// calculateDocStats calculates all document statistics
+func calculateDocStats(data map[string]any, docPath string) docStats {
+	jsonBytes, _ := json.Marshal(data)
+	maxName, maxValue := findMaxFieldSizes(data)
+	return docStats{
+		sizeBytes:     len(jsonBytes),
+		fieldCount:    countFields(data),
+		maxDepth:      calculateDepth(data),
+		maxFieldName:  maxName,
+		maxFieldValue: maxValue,
+		docPathLen:    len(docPath),
+	}
+}
+
+// findMaxFieldSizes finds the largest field name and value sizes
+func findMaxFieldSizes(data any) (maxName int, maxValue int) {
+	switch v := data.(type) {
+	case map[string]any:
+		for key, val := range v {
+			nameLen := len(key)
+			if nameLen > maxName {
+				maxName = nameLen
+			}
+			// Calculate value size
+			valBytes, _ := json.Marshal(val)
+			if len(valBytes) > maxValue {
+				maxValue = len(valBytes)
+			}
+			// Recurse into nested structures
+			nestedName, nestedValue := findMaxFieldSizes(val)
+			if nestedName > maxName {
+				maxName = nestedName
+			}
+			if nestedValue > maxValue {
+				maxValue = nestedValue
+			}
+		}
+	case []any:
+		for _, item := range v {
+			nestedName, nestedValue := findMaxFieldSizes(item)
+			if nestedName > maxName {
+				maxName = nestedName
+			}
+			if nestedValue > maxValue {
+				maxValue = nestedValue
+			}
+		}
+	}
+	return
+}
+
+// countFields counts all fields including nested ones
+func countFields(data any) int {
+	switch v := data.(type) {
+	case map[string]any:
+		count := len(v)
+		for _, val := range v {
+			count += countFields(val)
+		}
+		return count
+	case []any:
+		count := 0
+		for _, item := range v {
+			count += countFields(item)
+		}
+		return count
+	default:
+		return 0
+	}
+}
+
+// calculateDepth calculates the maximum nesting depth
+func calculateDepth(data any) int {
+	switch v := data.(type) {
+	case map[string]any:
+		maxChildDepth := 0
+		for _, val := range v {
+			d := calculateDepth(val)
+			if d > maxChildDepth {
+				maxChildDepth = d
+			}
+		}
+		return 1 + maxChildDepth
+	case []any:
+		maxChildDepth := 0
+		for _, item := range v {
+			d := calculateDepth(item)
+			if d > maxChildDepth {
+				maxChildDepth = d
+			}
+		}
+		return 1 + maxChildDepth
+	default:
+		return 0
+	}
+}
+
+// formatDocStats returns a formatted string showing document stats with warnings
+func formatDocStats(stats docStats) string {
+	// Helper to get color based on percentage of limit
+	// Tiers: green <50%, cyan 50-70%, yellow 70-85%, orange 85-100%, red >100%
+	getColor := func(value, limit int) string {
+		pct := value * 100 / limit
+		if pct > 100 {
+			return "\033[31m" // red - over limit
+		} else if pct > 85 {
+			return "\033[38;5;208m" // orange - critical
+		} else if pct > 70 {
+			return "\033[33m" // yellow - warning
+		} else if pct > 50 {
+			return "\033[36m" // cyan - moderate
+		}
+		return "\033[32m" // green - ok
+	}
+
+	// Line 1: Size, Fields, Depth
+	line1 := fmt.Sprintf("\033[90mSize:\033[0m %s%s / 1MB\033[0m  \033[90mFields:\033[0m %s%d / %d\033[0m  \033[90mDepth:\033[0m %s%d / %d\033[0m",
+		getColor(stats.sizeBytes, maxDocSizeBytes), formatBytes(stats.sizeBytes),
+		getColor(stats.fieldCount, maxFieldCount), stats.fieldCount, maxFieldCount,
+		getColor(stats.maxDepth, maxDepth), stats.maxDepth, maxDepth)
+
+	// Line 2: Field Name, Field Value, Doc Path
+	line2 := fmt.Sprintf("\033[90mField Name:\033[0m %s%d / %d B\033[0m  \033[90mField Value:\033[0m %s%s / 1MB\033[0m  \033[90mPath:\033[0m %s%d / %d B\033[0m",
+		getColor(stats.maxFieldName, maxFieldNameBytes), stats.maxFieldName, maxFieldNameBytes,
+		getColor(stats.maxFieldValue, maxFieldValueBytes), formatBytes(stats.maxFieldValue),
+		getColor(stats.docPathLen, maxDocNameBytes), stats.docPathLen, maxDocNameBytes)
+
+	return line1 + "\n" + line2
+}
+
+// formatBytes formats bytes into human readable string
+func formatBytes(bytes int) string {
+	if bytes < 1024 {
+		return fmt.Sprintf("%d B", bytes)
+	} else if bytes < 1024*1024 {
+		return fmt.Sprintf("%.1f KB", float64(bytes)/1024)
+	}
+	return fmt.Sprintf("%.2f MB", float64(bytes)/(1024*1024))
 }

@@ -66,8 +66,9 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 			Handler:     g.doCursorUp,
 			Description: "Move up",
 			Contexts: map[Context]func() error{
-				ContextHelp:  g.helpMoveUp,
-				ContextModal: g.blockAction,
+				ContextHelp:   g.helpMoveUp,
+				ContextModal:  g.blockAction,
+				ContextSelect: g.selectMoveUp,
 			},
 		},
 		{
@@ -75,8 +76,9 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 			Handler:     g.doCursorDown,
 			Description: "Move down",
 			Contexts: map[Context]func() error{
-				ContextHelp:  g.helpMoveDown,
-				ContextModal: g.blockAction,
+				ContextHelp:   g.helpMoveDown,
+				ContextModal:  g.blockAction,
+				ContextSelect: g.selectMoveDown,
 			},
 		},
 		// Arrow left/right - context aware
@@ -109,6 +111,7 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 				ContextFilter: g.filterInsertJ,
 				ContextHelp:   g.helpMoveDown,
 				ContextModal:  g.blockAction,
+				ContextSelect: g.selectMoveDown,
 			},
 		},
 		{
@@ -119,6 +122,7 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 				ContextFilter: g.filterInsertK,
 				ContextHelp:   g.helpMoveUp,
 				ContextModal:  g.blockAction,
+				ContextSelect: g.selectMoveUp,
 			},
 		},
 		{
@@ -161,6 +165,7 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 				ContextFilter: g.filterInsertSpace,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
+				ContextSelect: g.doFetchSelectedDocs,
 			},
 		},
 		// Enter - context aware
@@ -200,8 +205,8 @@ func (g *Gui) filterBindings(km *KeybindingManager) []*Binding {
 	}
 
 	// Character handlers for filter input (includes jq syntax chars)
-	// Exclude chars that have dedicated context-aware bindings: hjkl, csrq, ?@/
-	filterChars := "abdefgimnoptuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	// Exclude chars that have dedicated context-aware bindings: hjklv, csrq, ?@/
+	filterChars := "abdefgimnoptuwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	filterChars += "-_. "
 	filterChars += "[]|(){}:\"'`,<>=!+*^$#~;&%\\"
 	for _, ch := range filterChars {
@@ -245,6 +250,17 @@ func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
 				ContextFilter: g.filterInsertR,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
+			},
+		},
+		{
+			Key:         'v',
+			Handler:     g.doToggleSelectMode,
+			Description: "Select mode",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.filterInsertV,
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextSelect: g.doToggleSelectMode, // Toggle off
 			},
 		},
 	}

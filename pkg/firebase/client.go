@@ -44,21 +44,18 @@ type ProjectDetails struct {
 }
 
 // NewClient creates a new Firebase client using existing CLI authentication.
-// It verifies that the user is logged in via 'firebase login'.
+// Authentication is verified lazily when ListProjects is called.
 func NewClient(ctx context.Context, cfg *config.Config) (*Client, error) {
-	client := &Client{
+	// Just verify firebase CLI is installed (fast check)
+	if _, err := exec.LookPath("firebase"); err != nil {
+		return nil, fmt.Errorf("firebase CLI not found. Please install it: npm install -g firebase-tools")
+	}
+
+	return &Client{
 		ctx:            ctx,
 		config:         cfg,
 		usingLocalAuth: true,
-	}
-
-	// Verify Firebase CLI is logged in
-	cmd := exec.Command("firebase", "projects:list", "--json")
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("not logged in. Please run 'firebase login' first")
-	}
-
-	return client, nil
+	}, nil
 }
 
 // ListProjects returns all Firebase projects accessible to the authenticated user.
