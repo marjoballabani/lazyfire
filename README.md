@@ -62,39 +62,15 @@ Download pre-built binaries from the [releases page](https://github.com/marjobal
 
 3. **Navigate:** Use arrow keys or `h/j/k/l` to browse your Firestore data.
 
-## Layout
+## Preview
 
-```
-╭─────────────╮╭──────────────────────────────────────╮
-│  Projects   ││                                      │
-│             ││                                      │
-│   dev       ││           Details                    │
-│ * prod      ││                                      │
-│   staging   ││   {                                  │
-├─────────────┤│     "name": "John",                  │
-│ Collections ││     "email": "john@example.com",     │
-│             ││     "age": 30                        │
-│   users     ││   }                                  │
-│ * orders    ││                                      │
-│   products  ││                                      │
-├─────────────┤├──────────────────────────────────────┤
-│    Tree     ││  Commands                            │
-│             ││  ✓ ListCollections → 3 collections   │
-│  ├─ abc123  │╰──────────────────────────────────────╯
-│  └─ def456  │
-╰─────────────╯
-╭────────────────────────────────────────────────────╮
-│ ←/→ panels  j/k move  Space select  @ logs  q quit │
-╰────────────────────────────────────────────────────╯
-```
+![LazyFire Preview](assets/preview.png)
 
-**Left side (stacked):**
+**Panels:**
 - **Projects** - Your Firebase projects
 - **Collections** - Root collections in selected project
 - **Tree** - Documents and subcollections (expandable)
-
-**Right side:**
-- **Details** - Document JSON data
+- **Details** - Document JSON data with syntax highlighting
 - **Commands** - API call status
 
 ## Keybindings
