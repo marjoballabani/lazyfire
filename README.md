@@ -64,7 +64,7 @@ Download pre-built binaries from the [releases page](https://github.com/marjobal
 
 ## Preview
 
-![LazyFire Preview](assets/preview.png)
+![LazyFire Preview](assets/preview.gif)
 
 **Panels:**
 - **Projects** - Your Firebase projects
