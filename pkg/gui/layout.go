@@ -739,8 +739,16 @@ func (g *Gui) updateHelpView(v *gocui.View) {
 		// Show text with cursor at correct position
 		beforeCursor := g.filterInputText[:g.filterCursorPos]
 		afterCursor := g.filterInputText[g.filterCursorPos:]
-		// Cursor shown as reverse video block
-		filterPrompt := fmt.Sprintf(" \033[33mFilter %s:\033[0m %s\033[7m \033[0m%s", panelName, beforeCursor, afterCursor)
+		// Cursor shown as reverse video - highlight char at cursor or space if at end
+		var cursorChar, rest string
+		if len(afterCursor) > 0 {
+			cursorChar = string(afterCursor[0])
+			rest = afterCursor[1:]
+		} else {
+			cursorChar = " "
+			rest = ""
+		}
+		filterPrompt := fmt.Sprintf(" \033[33mFilter %s:\033[0m %s\033[7m%s\033[0m%s", panelName, beforeCursor, cursorChar, rest)
 		hints := "  \033[90m(Enter to select, Esc to cancel)\033[0m"
 		fmt.Fprintf(v, "%s%s", filterPrompt, hints)
 		return

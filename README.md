@@ -11,7 +11,8 @@ A terminal UI for browsing Firebase Firestore, inspired by [lazygit](https://git
 - Browse Firestore collections and documents
 - Expandable tree view for nested subcollections
 - View document data as syntax-highlighted JSON
-- Filter/search across all panels and JSON content
+- Filter/search across all panels
+- **jq query support** for filtering JSON in details panel
 - Vim-style keybindings (h/j/k/l)
 - Mouse support (click to select, navigate)
 - Customizable theme (hex colors, 256-color, bold)
@@ -104,12 +105,13 @@ Download pre-built binaries from the [releases page](https://github.com/marjobal
 | `l` `→` | Move to right panel |
 | `j` `↓` | Move down in list |
 | `k` `↑` | Move up in list |
-| `Enter` | View details / Execute shortcut |
-| `Space` | Select / Expand |
-| `/` | Filter current panel (Enter selects, Esc cancels) |
-| `c` | Copy document JSON to clipboard |
-| `s` | Save document JSON to ~/Downloads |
-| `Esc` | Collapse node / Close popup / Cancel filter |
+| `Tab` | Go to details panel |
+| `Enter` | Open document in details / Fetch project info |
+| `Space` | Select / Expand / Collapse |
+| `/` | Filter current panel |
+| `c` | Copy JSON to clipboard (respects jq filter) |
+| `s` | Save JSON to ~/Downloads (respects jq filter) |
+| `Esc` | Back: close popup / cancel filter / clear filter / exit details |
 | `r` | Refresh |
 | `?` | Show keyboard shortcuts |
 | `@` | Show command history |
@@ -119,6 +121,19 @@ Download pre-built binaries from the [releases page](https://github.com/marjobal
 
 - **Click** on any panel to focus and select item
 - **Click** outside popup to close it
+
+## Filtering & jq Queries
+
+Press `/` to filter any panel. In the **details panel**, you can use jq queries:
+
+| Filter | Description |
+|--------|-------------|
+| `name` | Text search - shows lines containing "name" |
+| `.name` | jq query - extracts the `name` field |
+| `.users[0]` | jq query - first element of users array |
+| `.data \| keys` | jq query - list keys of data object |
+
+When a jq filter is active, `c` and `s` copy/save the filtered result instead of the full document.
 
 ## Configuration
 

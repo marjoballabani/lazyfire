@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/itchyny/gojq"
 )
 
 // copyJSONAction copies current document to clipboard
@@ -79,6 +81,7 @@ func (g *Gui) saveJSONAction() error {
 }
 
 // getDocumentToCopy returns the document data to copy/save.
+// If a jq filter is active on details, returns the filtered result.
 func (g *Gui) getDocumentToCopy() (map[string]any, string, error) {
 	filtered := g.getFilteredTreeNodes()
 	if g.currentColumn == "tree" && len(filtered) > 0 && g.selectedTreeIdx < len(filtered) {
@@ -96,8 +99,47 @@ func (g *Gui) getDocumentToCopy() (map[string]any, string, error) {
 	}
 
 	if g.currentDocData != nil {
+		// Check if jq filter is active on details - return filtered result
+		if g.currentColumn == "details" {
+			if jqResult, path, ok := g.getJqFilteredResult(); ok {
+				return jqResult, path, nil
+			}
+		}
 		return g.currentDocData, g.currentDocPath, nil
 	}
 
 	return nil, "", fmt.Errorf("No document selected")
+}
+
+// getJqFilteredResult returns the jq-filtered result if a jq filter is active
+func (g *Gui) getJqFilteredResult() (map[string]any, string, bool) {
+	filter := g.getDetailsFilter()
+	if !strings.HasPrefix(filter, ".") {
+		return nil, "", false
+	}
+
+	jqQuery, err := gojq.Parse(filter)
+	if err != nil {
+		return nil, "", false
+	}
+
+	iter := jqQuery.Run(g.currentDocData)
+	result, ok := iter.Next()
+	if !ok {
+		return nil, "", false
+	}
+
+	if _, isErr := result.(error); isErr {
+		return nil, "", false
+	}
+
+	// Convert result to map if possible
+	if resultMap, ok := result.(map[string]any); ok {
+		path := fmt.Sprintf("%s (jq: %s)", g.currentDocPath, filter)
+		return resultMap, path, true
+	}
+
+	// Wrap non-map results
+	path := fmt.Sprintf("%s (jq: %s)", g.currentDocPath, filter)
+	return map[string]any{"result": result}, path, true
 }
