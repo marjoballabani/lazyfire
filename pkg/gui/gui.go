@@ -144,14 +144,18 @@ func NewGui(config *config.Config, firebaseClient *firebase.Client, version stri
 	theme := NewTheme(config.UI.Theme)
 
 	// Initialize icons based on config
-	switch config.UI.NerdFontsVersion {
-	case "2":
-		icons.PatchForNerdFontsV2()
-	case "3":
-		// Default v3 icons, nothing to do
-	default:
-		// Disable icons for graceful fallback
+	if !config.UI.ShowIcons {
 		icons.SetEnabled(false)
+	} else {
+		switch config.UI.NerdFontsVersion {
+		case "2":
+			icons.PatchForNerdFontsV2()
+		case "3":
+			// Default v3 icons, nothing to do
+		default:
+			// Disable icons for graceful fallback
+			icons.SetEnabled(false)
+		}
 	}
 
 	gui := &Gui{

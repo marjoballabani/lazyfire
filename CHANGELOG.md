@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.33] - 2025-01-08
+
+### Added
+- **Unit tests** for core functionality (filter, JSON colorizer, document stats, config, icons)
+- **Enhanced CI pipeline** with coverage reporting and linting
+- **`showIcons` config option** to easily enable/disable icons
+
+### Changed
+- **New default theme** with Catppuccin-inspired colors (pink active border, muted inactive)
+
 ## [0.1.32] - 2025-01-08
 
 ### Added

@@ -146,6 +146,11 @@ func (g *Gui) insertFilterChar(gui *gocui.Gui, ch rune) error {
 
 // matchesFilter checks if text contains the filter string (case-insensitive)
 func (g *Gui) matchesFilter(text, filter string) bool {
+	return MatchesFilter(text, filter)
+}
+
+// MatchesFilter checks if text contains the filter string (case-insensitive)
+func MatchesFilter(text, filter string) bool {
 	if filter == "" {
 		return true
 	}

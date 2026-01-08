@@ -16,8 +16,9 @@ type Config struct {
 
 // UIConfig contains user interface configuration options.
 type UIConfig struct {
-	Theme          ThemeConfig `mapstructure:"theme"`
-	NerdFontsVersion string    `mapstructure:"nerdFontsVersion"` // "2", "3", or "" to disable
+	ShowIcons        bool        `mapstructure:"showIcons"`        // Enable/disable icons
+	NerdFontsVersion string      `mapstructure:"nerdFontsVersion"` // "2", "3", or "" to disable
+	Theme            ThemeConfig `mapstructure:"theme"`
 }
 
 // ThemeConfig defines the color scheme for the terminal UI.
@@ -43,12 +44,13 @@ func LoadConfig() (*Config, error) {
 	// Default configuration
 	config := &Config{
 		UI: UIConfig{
+			ShowIcons:        true,
 			NerdFontsVersion: "3", // Default to Nerd Fonts v3, set to "" to disable
 			Theme: ThemeConfig{
-				ActiveBorderColor:   []string{"cyan"},
-				InactiveBorderColor: []string{"default"},
-				OptionsTextColor:    []string{"cyan"},
-				SelectedLineBgColor: []string{"blue"},
+				ActiveBorderColor:   []string{"#ed8796", "bold"},
+				InactiveBorderColor: []string{"#5f626b"},
+				OptionsTextColor:    []string{"#8aadf4"},
+				SelectedLineBgColor: []string{"#494d64", "bold"},
 			},
 		},
 	}
