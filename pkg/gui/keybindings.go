@@ -205,8 +205,8 @@ func (g *Gui) filterBindings(km *KeybindingManager) []*Binding {
 	}
 
 	// Character handlers for filter input (includes jq syntax chars)
-	// Exclude chars that have dedicated context-aware bindings: hjklv, csrq, ?@/
-	filterChars := "abdefgimnoptuwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	// Exclude chars that have dedicated context-aware bindings: hjkl, csrqve, ?@/
+	filterChars := "abdfgimnoptuwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	filterChars += "-_. "
 	filterChars += "[]|(){}:\"'`,<>=!+*^$#~;&%\\"
 	for _, ch := range filterChars {
@@ -261,6 +261,16 @@ func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
 				ContextSelect: g.doToggleSelectMode, // Toggle off
+			},
+		},
+		{
+			Key:         'e',
+			Handler:     g.doEditInEditor,
+			Description: "Edit in $EDITOR",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.filterInsertE,
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
 			},
 		},
 	}

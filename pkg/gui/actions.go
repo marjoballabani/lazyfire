@@ -1,7 +1,10 @@
 package gui
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"sync"
 
 	"github.com/jesseduffield/gocui"
@@ -134,6 +137,7 @@ func (g *Gui) filterInsertS() error         { return g.insertFilterChar(g.g, 's'
 func (g *Gui) filterInsertR() error         { return g.insertFilterChar(g.g, 'r') }
 func (g *Gui) filterInsertQ() error         { return g.insertFilterChar(g.g, 'q') }
 func (g *Gui) filterInsertV() error         { return g.insertFilterChar(g.g, 'v') }
+func (g *Gui) filterInsertE() error         { return g.insertFilterChar(g.g, 'e') }
 func (g *Gui) filterInsertSlash() error     { return g.insertFilterChar(g.g, '/') }
 
 // doColumnLeft switches to the panel on the left (skips details)
@@ -326,6 +330,78 @@ func (g *Gui) doCopyJSON() error {
 // doSaveJSON saves current document to file
 func (g *Gui) doSaveJSON() error {
 	return g.saveJSONAction()
+}
+
+// doEditInEditor opens current document in external editor
+func (g *Gui) doEditInEditor() error {
+	if g.currentColumn != "details" {
+		return nil
+	}
+
+	if g.currentDocData == nil {
+		g.logCommand("e", "No document loaded", "error")
+		return nil
+	}
+
+	g.logCommand("e", "Opening editor...", "running")
+
+	// Get editor from environment, try nvim then vim as fallback
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = os.Getenv("VISUAL")
+	}
+	if editor == "" {
+		// Check if nvim is available, otherwise use vim
+		if _, err := exec.LookPath("nvim"); err == nil {
+			editor = "nvim"
+		} else {
+			editor = "vim"
+		}
+	}
+
+	// Format JSON
+	jsonData, err := json.MarshalIndent(g.currentDocData, "", "  ")
+	if err != nil {
+		g.logCommand("e", fmt.Sprintf("JSON error: %v", err), "error")
+		return nil
+	}
+
+	// Create temp file
+	tmpFile, err := os.CreateTemp("", "lazyfire-*.json")
+	if err != nil {
+		g.logCommand("e", fmt.Sprintf("Temp file error: %v", err), "error")
+		return nil
+	}
+	tmpPath := tmpFile.Name()
+
+	if _, err := tmpFile.Write(jsonData); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		g.logCommand("e", fmt.Sprintf("Write error: %v", err), "error")
+		return nil
+	}
+	tmpFile.Close()
+
+	// Run editor synchronously (blocks until editor closes)
+	cmd := exec.Command(editor, tmpPath)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	g.g.Suspend()
+	err = cmd.Run()
+	g.g.Resume()
+
+	// Clean up temp file
+	os.Remove(tmpPath)
+
+	if err != nil {
+		g.logCommand("e", fmt.Sprintf("Editor error: %v", err), "error")
+	} else {
+		g.logCommand("e", fmt.Sprintf("Opened in %s", editor), "success")
+	}
+
+	return g.Layout(g.g)
 }
 
 // doRefresh reloads all data

@@ -341,6 +341,7 @@ func (g *Gui) buildHelpPopup() {
 			PopupItem{Key: "Esc", Label: "Go back"},
 			PopupItem{Key: "c", Label: "Copy JSON to clipboard", Action: g.doCopyJSON},
 			PopupItem{Key: "s", Label: "Save JSON to Downloads", Action: g.doSaveJSON},
+			PopupItem{Key: "e", Label: "Open in editor", Action: g.doEditInEditor},
 		)
 	}
 

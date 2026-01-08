@@ -56,6 +56,7 @@ LazyFire uses vim-style navigation throughout the interface.
 - `/` - Start [filter/jq query](Filtering)
 - `c` - Copy JSON to clipboard
 - `s` - Save JSON to file
+- `e` - Open in external editor (uses `$EDITOR` or vim)
 
 ## Global Keys
 

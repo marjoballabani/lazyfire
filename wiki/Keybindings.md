@@ -66,6 +66,7 @@ Complete reference of all keyboard shortcuts in LazyFire.
 | `k` / `↑` | Scroll up |
 | `c` | Copy JSON to clipboard |
 | `s` | Save JSON to file |
+| `e` | Open in external editor ($EDITOR or vim) |
 | `/` | Start filter/jq query |
 
 ## Help Popup

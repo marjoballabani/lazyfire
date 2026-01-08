@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.33] - 2025-01-08
+## [0.1.34] - 2025-01-09
+
+### Added
+- **Open in editor** - press `e` in details panel to open JSON in external editor
+  - Uses `$EDITOR` or `$VISUAL` environment variable
+  - Falls back to `nvim` if installed, otherwise `vim`
+
+## [0.1.33] - 2025-01-09
 
 ### Added
 - **Unit tests** for core functionality (filter, JSON colorizer, document stats, config, icons)
 - **Enhanced CI pipeline** with coverage reporting and linting
 - **`showIcons` config option** to easily enable/disable icons
+- **GitHub Wiki** documentation for all features
 
 ### Changed
 - **New default theme** with Catppuccin-inspired colors (pink active border, muted inactive)
