@@ -12,8 +12,10 @@ A terminal UI for browsing Firebase Firestore, inspired by [lazygit](https://git
 - Expandable tree view for nested subcollections
 - View document data as syntax-highlighted JSON
 - Filter/search across all panels
+- **Query Builder** - Interactive Firestore query builder with WHERE, ORDER BY, LIMIT
 - **jq query support** for filtering JSON in details panel
 - **Visual select mode** for multi-document selection and parallel fetching
+- **Smart caching** - Documents and collections cached with visual indicator
 - **Document stats** with Firestore limits validation (size, fields, depth)
 - Vim-style keybindings (h/j/k/l)
 - Mouse support (click to select, navigate)
@@ -87,9 +89,11 @@ Download pre-built binaries from the [releases page](https://github.com/marjobal
 | `Enter` | Open document in details / Fetch project info |
 | `Space` | Select / Expand / Collapse (fetch selected in select mode) |
 | `v` | Toggle select mode (tree panel) |
+| `F` | Open query builder (collections/tree panel) |
 | `/` | Filter current panel |
 | `c` | Copy JSON to clipboard (respects jq filter) |
 | `s` | Save JSON to ~/Downloads (respects jq filter) |
+| `e` | Open in external editor (details panel) |
 | `Esc` | Back: close popup / cancel filter / clear filter / exit select mode |
 | `r` | Refresh |
 | `?` | Show keyboard shortcuts |
@@ -113,6 +117,32 @@ Press `/` to filter any panel. In the **details panel**, you can use jq queries:
 | `.data \| keys` | jq query - list keys of data object |
 
 When a jq filter is active, `c` and `s` copy/save the filtered result instead of the full document.
+
+## Query Builder
+
+Press `F` (Shift+F) on a collection or subcollection to open the query builder:
+
+```
+┌─ Query Builder ─────────────────────────────┐
+│ Collection: users                           │
+│                                             │
+│ WHERE:                                      │
+│   [status] [==] (auto) [active]             │
+│                                             │
+│ ORDER BY:  [created] [DESC]                 │
+│ LIMIT:     [50]                             │
+│                                             │
+│ [ Execute ]  [ Clear ]                      │
+└─────────────────────────────────────────────┘
+```
+
+- **Navigate:** `j`/`k` to move between rows, `h`/`l` to move between fields
+- **Edit:** `Enter` to edit a field, `a` to add filter, `d` to delete filter
+- **Operators:** `==`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `array-contains`
+- **Execute:** Run query and show results in tree
+- **Clear:** Reset all filters
+
+Query results appear in the tree panel. For subcollection queries, results appear under the subcollection node.
 
 ## Configuration
 

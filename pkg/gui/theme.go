@@ -122,7 +122,12 @@ func (t *Theme) GetAnsiColorCode() string {
 	return attributeToAnsi(t.ActiveBorderColor)
 }
 
-// attributeToAnsi converts a gocui.Attribute to an ANSI escape sequence.
+// GetSelectedBgAnsiCode returns the ANSI escape code for the selected line background.
+func (t *Theme) GetSelectedBgAnsiCode() string {
+	return attributeToBgAnsi(t.SelectedLineBgColor)
+}
+
+// attributeToAnsi converts a gocui.Attribute to an ANSI foreground escape sequence.
 func attributeToAnsi(attr gocui.Attribute) string {
 	// Check for RGB/true color
 	if attr&gocui.AttrIsValidColor != 0 {
@@ -155,5 +160,41 @@ func attributeToAnsi(attr gocui.Attribute) string {
 		return "\033[37m"
 	default:
 		return "\033[36m" // Default to cyan
+	}
+}
+
+// attributeToBgAnsi converts a gocui.Attribute to an ANSI background escape sequence.
+func attributeToBgAnsi(attr gocui.Attribute) string {
+	// Check for RGB/true color
+	if attr&gocui.AttrIsValidColor != 0 {
+		rgb := uint32(attr & 0xFFFFFF)
+		r := (rgb >> 16) & 0xFF
+		g := (rgb >> 8) & 0xFF
+		b := rgb & 0xFF
+		return fmt.Sprintf("\033[48;2;%d;%d;%dm", r, g, b)
+	}
+
+	// Basic 8 colors (background uses 4x instead of 3x)
+	switch attr & 0xFF {
+	case gocui.Attribute(0): // ColorDefault
+		return "\033[44m" // Default to blue background
+	case gocui.Attribute(1): // ColorBlack
+		return "\033[40m"
+	case gocui.Attribute(2): // ColorRed
+		return "\033[41m"
+	case gocui.Attribute(3): // ColorGreen
+		return "\033[42m"
+	case gocui.Attribute(4): // ColorYellow
+		return "\033[43m"
+	case gocui.Attribute(5): // ColorBlue
+		return "\033[44m"
+	case gocui.Attribute(6): // ColorMagenta
+		return "\033[45m"
+	case gocui.Attribute(7): // ColorCyan
+		return "\033[46m"
+	case gocui.Attribute(8): // ColorWhite
+		return "\033[47m"
+	default:
+		return "\033[44m" // Default to blue background
 	}
 }

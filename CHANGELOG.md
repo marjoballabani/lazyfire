@@ -10,9 +10,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.34] - 2025-01-09
 
 ### Added
+- **Query Builder** - Press `F` (Shift+F) to open interactive query builder
+  - Filter documents with WHERE clauses (==, !=, <, <=, >, >=, in, array-contains)
+  - ORDER BY field with ASC/DESC direction
+  - LIMIT results
+  - Works on collections panel and subcollections in tree
+  - Clear button to reset all filters
+  - Execute button to run query
+  - Popup selector for operators and value types
+- **Smart Document Caching**
+  - Documents cached after fetch (yellow dot · indicator in tree)
+  - Collection contents cached (re-expanding uses cache)
+  - Multi-select uses cache for already-fetched documents
+- **Tree View Improvements**
+  - Arrow indicators (▶ collapsed, ▼ expanded) for collections
+  - Cyan colored folder icons for collections
+  - Green colored document icons
+  - Proper indentation alignment for nested items
+- **Projects Panel Improvements**
+  - Firebase icon (orange) for projects list
+  - Matches welcome screen branding
+- **Collections Panel Improvements**
+  - Cyan colored folder icons
+- **Welcome Screen Improvements**
+  - New flame ASCII art with hollow middle design
+  - Version number display
+  - Credits: "Created by Marjo Ballabani"
+  - GitHub repository link
 - **Open in editor** - press `e` in details panel to open JSON in external editor
   - Uses `$EDITOR` or `$VISUAL` environment variable
   - Falls back to `nvim` if installed, otherwise `vim`
+
+### Changed
+- **Visual Select Mode** now uses range-based selection (like vim visual mode)
+  - Can select in either direction (up or down from start)
+  - Dim yellow + marker for selected items
+- Query builder keybinding changed from `Q` to `F` (Shift+F) to avoid accidental quit
 
 ## [0.1.33] - 2025-01-09
 

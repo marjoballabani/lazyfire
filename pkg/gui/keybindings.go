@@ -31,12 +31,17 @@ func (g *Gui) globalBindings(km *KeybindingManager) []*Binding {
 				ContextFilter: g.filterInsertQ,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('q'),
 			},
 		},
 		{
 			Key:         gocui.KeyEsc,
 			Handler:     g.doEscape,
 			Description: "Close/Cancel",
+			Contexts: map[Context]func() error{
+				ContextQuery:       g.queryClose,
+				ContextQuerySelect: g.querySelectClose,
+			},
 		},
 		{
 			Key:         '?',
@@ -44,6 +49,7 @@ func (g *Gui) globalBindings(km *KeybindingManager) []*Binding {
 			Description: "Show help",
 			Contexts: map[Context]func() error{
 				ContextFilter: g.filterInsertQuestion,
+				ContextQuery:  g.queryInsertChar('?'),
 			},
 		},
 		{
@@ -52,6 +58,7 @@ func (g *Gui) globalBindings(km *KeybindingManager) []*Binding {
 			Description: "Command log",
 			Contexts: map[Context]func() error{
 				ContextFilter: g.filterInsertAt,
+				ContextQuery:  g.queryInsertChar('@'),
 			},
 		},
 	}
@@ -66,9 +73,11 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 			Handler:     g.doCursorUp,
 			Description: "Move up",
 			Contexts: map[Context]func() error{
-				ContextHelp:   g.helpMoveUp,
-				ContextModal:  g.blockAction,
-				ContextSelect: g.selectMoveUp,
+				ContextHelp:        g.helpMoveUp,
+				ContextModal:       g.blockAction,
+				ContextSelect:      g.selectMoveUp,
+				ContextQuery:       g.queryMoveUp,
+				ContextQuerySelect: g.querySelectMoveUp,
 			},
 		},
 		{
@@ -76,9 +85,11 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 			Handler:     g.doCursorDown,
 			Description: "Move down",
 			Contexts: map[Context]func() error{
-				ContextHelp:   g.helpMoveDown,
-				ContextModal:  g.blockAction,
-				ContextSelect: g.selectMoveDown,
+				ContextHelp:        g.helpMoveDown,
+				ContextModal:       g.blockAction,
+				ContextSelect:      g.selectMoveDown,
+				ContextQuery:       g.queryMoveDown,
+				ContextQuerySelect: g.querySelectMoveDown,
 			},
 		},
 		// Arrow left/right - context aware
@@ -90,6 +101,7 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 				ContextFilter: g.filterCursorLeft,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryMoveLeft,
 			},
 		},
 		{
@@ -100,6 +112,7 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 				ContextFilter: g.filterCursorRight,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryMoveRight,
 			},
 		},
 		// Vim keys - context aware
@@ -108,10 +121,12 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 			Handler:     g.doCursorDown,
 			Description: "Move down",
 			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertJ,
-				ContextHelp:   g.helpMoveDown,
-				ContextModal:  g.blockAction,
-				ContextSelect: g.selectMoveDown,
+				ContextFilter:      g.filterInsertJ,
+				ContextHelp:        g.helpMoveDown,
+				ContextModal:       g.blockAction,
+				ContextSelect:      g.selectMoveDown,
+				ContextQuery:       g.queryKeyJ,
+				ContextQuerySelect: g.querySelectMoveDown,
 			},
 		},
 		{
@@ -119,10 +134,12 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 			Handler:     g.doCursorUp,
 			Description: "Move up",
 			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertK,
-				ContextHelp:   g.helpMoveUp,
-				ContextModal:  g.blockAction,
-				ContextSelect: g.selectMoveUp,
+				ContextFilter:      g.filterInsertK,
+				ContextHelp:        g.helpMoveUp,
+				ContextModal:       g.blockAction,
+				ContextSelect:      g.selectMoveUp,
+				ContextQuery:       g.queryKeyK,
+				ContextQuerySelect: g.querySelectMoveUp,
 			},
 		},
 		{
@@ -133,6 +150,7 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 				ContextFilter: g.filterInsertH,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryKeyH,
 			},
 		},
 		{
@@ -143,6 +161,7 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 				ContextFilter: g.filterInsertL,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryKeyL,
 			},
 		},
 		// Tab
@@ -154,6 +173,7 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 				ContextFilter: g.blockAction,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryNextField,
 			},
 		},
 		// Space - context aware
@@ -166,6 +186,7 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
 				ContextSelect: g.doFetchSelectedDocs,
+				ContextQuery:  g.blockAction,
 			},
 		},
 		// Enter - context aware
@@ -174,8 +195,10 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 			Handler:     g.doEnter,
 			Description: "Confirm/Details",
 			Contexts: map[Context]func() error{
-				ContextFilter: g.filterCommit,
-				ContextHelp:   g.helpClose,
+				ContextFilter:      g.filterCommit,
+				ContextHelp:        g.helpClose,
+				ContextQuery:       g.queryEnter,
+				ContextQuerySelect: g.querySelectConfirm,
 			},
 		},
 	}
@@ -192,27 +215,38 @@ func (g *Gui) filterBindings(km *KeybindingManager) []*Binding {
 				ContextFilter: g.filterInsertSlash,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('/'),
 			},
 		},
 		{
 			Key:     gocui.KeyBackspace,
 			Handler: g.doFilterBackspace,
+			Contexts: map[Context]func() error{
+				ContextQuery: g.queryBackspace,
+			},
 		},
 		{
 			Key:     gocui.KeyBackspace2,
 			Handler: g.doFilterBackspace,
+			Contexts: map[Context]func() error{
+				ContextQuery: g.queryBackspace,
+			},
 		},
 	}
 
 	// Character handlers for filter input (includes jq syntax chars)
-	// Exclude chars that have dedicated context-aware bindings: hjkl, csrqve, ?@/
-	filterChars := "abdfgimnoptuwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	// Exclude chars that have dedicated context-aware bindings: hjkl, csrqveFQ, ?@/
+	filterChars := "abdfgimnoptuwxyzABCDEGHIJKLMNOPRSTUVWXYZ0123456789"
 	filterChars += "-_. "
 	filterChars += "[]|(){}:\"'`,<>=!+*^$#~;&%\\"
 	for _, ch := range filterChars {
+		c := ch // capture for closure
 		bindings = append(bindings, &Binding{
-			Key:     ch,
-			Handler: g.makeFilterCharAction(ch),
+			Key:     c,
+			Handler: g.makeFilterCharAction(c),
+			Contexts: map[Context]func() error{
+				ContextQuery: g.queryInsertChar(c),
+			},
 		})
 	}
 
@@ -223,6 +257,17 @@ func (g *Gui) filterBindings(km *KeybindingManager) []*Binding {
 func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
 	return []*Binding{
 		{
+			Key:         'F',
+			Handler:     g.doOpenQuery,
+			Description: "Query builder",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.filterInsertUpperF,
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('F'),
+			},
+		},
+		{
 			Key:         'c',
 			Handler:     g.doCopyJSON,
 			Description: "Copy JSON",
@@ -230,6 +275,7 @@ func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
 				ContextFilter: g.filterInsertC,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('c'),
 			},
 		},
 		{
@@ -240,6 +286,7 @@ func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
 				ContextFilter: g.filterInsertS,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('s'),
 			},
 		},
 		{
@@ -250,6 +297,7 @@ func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
 				ContextFilter: g.filterInsertR,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('r'),
 			},
 		},
 		{
@@ -261,6 +309,7 @@ func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
 				ContextSelect: g.doToggleSelectMode, // Toggle off
+				ContextQuery:  g.queryInsertChar('v'),
 			},
 		},
 		{
@@ -271,6 +320,7 @@ func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
 				ContextFilter: g.filterInsertE,
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('e'),
 			},
 		},
 	}

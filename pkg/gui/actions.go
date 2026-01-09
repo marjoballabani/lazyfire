@@ -135,7 +135,8 @@ func (g *Gui) filterInsertAt() error        { return g.insertFilterChar(g.g, '@'
 func (g *Gui) filterInsertC() error         { return g.insertFilterChar(g.g, 'c') }
 func (g *Gui) filterInsertS() error         { return g.insertFilterChar(g.g, 's') }
 func (g *Gui) filterInsertR() error         { return g.insertFilterChar(g.g, 'r') }
-func (g *Gui) filterInsertQ() error         { return g.insertFilterChar(g.g, 'q') }
+func (g *Gui) filterInsertQ() error      { return g.insertFilterChar(g.g, 'q') }
+func (g *Gui) filterInsertUpperF() error { return g.insertFilterChar(g.g, 'F') }
 func (g *Gui) filterInsertV() error         { return g.insertFilterChar(g.g, 'v') }
 func (g *Gui) filterInsertE() error         { return g.insertFilterChar(g.g, 'e') }
 func (g *Gui) filterInsertSlash() error     { return g.insertFilterChar(g.g, '/') }
@@ -388,9 +389,9 @@ func (g *Gui) doEditInEditor() error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	g.g.Suspend()
+	_ = g.g.Suspend()
 	err = cmd.Run()
-	g.g.Resume()
+	_ = g.g.Resume()
 
 	// Clean up temp file
 	os.Remove(tmpPath)
@@ -567,6 +568,23 @@ func (g *Gui) doExitSelectMode() error {
 	return g.Layout(g.g)
 }
 
+// updateSelectRange updates selectedDocs based on range from selectStartIdx to selectedTreeIdx
+func (g *Gui) updateSelectRange() {
+	filtered := g.getFilteredTreeNodes()
+	g.selectedDocs = make(map[int]bool)
+
+	start, end := g.selectStartIdx, g.selectedTreeIdx
+	if start > end {
+		start, end = end, start
+	}
+
+	for i := start; i <= end; i++ {
+		if i < len(filtered) && filtered[i].Type == "document" {
+			g.selectedDocs[i] = true
+		}
+	}
+}
+
 // selectMoveDown moves down in select mode, extending selection
 func (g *Gui) selectMoveDown() error {
 	if !g.selectMode || g.currentColumn != "tree" {
@@ -575,23 +593,19 @@ func (g *Gui) selectMoveDown() error {
 	filtered := g.getFilteredTreeNodes()
 	if g.selectedTreeIdx < len(filtered)-1 {
 		g.selectedTreeIdx++
-		// Select if it's a document
-		if filtered[g.selectedTreeIdx].Type == "document" {
-			g.selectedDocs[g.selectedTreeIdx] = true
-		}
+		g.updateSelectRange()
 	}
 	return g.Layout(g.g)
 }
 
-// selectMoveUp moves up in select mode, unselecting the item we leave
+// selectMoveUp moves up in select mode, extending selection
 func (g *Gui) selectMoveUp() error {
 	if !g.selectMode || g.currentColumn != "tree" {
 		return g.doCursorUp()
 	}
 	if g.selectedTreeIdx > 0 {
-		// Unselect the position we're leaving
-		delete(g.selectedDocs, g.selectedTreeIdx)
 		g.selectedTreeIdx--
+		g.updateSelectRange()
 	}
 	return g.Layout(g.g)
 }
@@ -604,21 +618,34 @@ func (g *Gui) doFetchSelectedDocs() error {
 
 	filtered := g.getFilteredTreeNodes()
 
-	// Collect paths to fetch
+	// Collect all selected paths and check cache
+	combined := make(map[string]any)
 	var toFetch []string
 	for idx := range g.selectedDocs {
 		if idx < len(filtered) && filtered[idx].Type == "document" {
-			toFetch = append(toFetch, filtered[idx].Path)
+			path := filtered[idx].Path
+			if cachedData, ok := g.docCache[path]; ok {
+				combined[path] = cachedData
+			} else {
+				toFetch = append(toFetch, path)
+			}
 		}
 	}
 
+	// If all docs are cached, no need to fetch
 	if len(toFetch) == 0 {
+		if len(combined) > 0 {
+			g.currentDocData = combined
+			g.currentDocPath = fmt.Sprintf("%d documents selected", len(combined))
+			g.clearDetailsCache()
+			g.logCommand("cache", fmt.Sprintf("Using %d cached documents", len(combined)), "success")
+		}
 		return g.Layout(g.g)
 	}
 
-	g.logCommand("api", fmt.Sprintf("Fetching %d documents...", len(toFetch)), "running")
+	g.logCommand("api", fmt.Sprintf("Fetching %d documents (%d cached)...", len(toFetch), len(combined)), "running")
 
-	// Fetch documents in parallel
+	// Fetch uncached documents in parallel
 	type result struct {
 		path string
 		data map[string]any
@@ -643,15 +670,13 @@ func (g *Gui) doFetchSelectedDocs() error {
 
 	wg.Wait()
 
-	// Combine results
-	combined := make(map[string]any)
-	var errorCount int
+	// Add fetched results to combined and cache them
 	for _, r := range results {
 		if r.err != nil {
 			g.logCommand("api", fmt.Sprintf("Error fetching %s: %v", r.path, r.err), "error")
-			errorCount++
 		} else {
 			combined[r.path] = r.data
+			g.docCache[r.path] = r.data
 		}
 	}
 
@@ -659,9 +684,183 @@ func (g *Gui) doFetchSelectedDocs() error {
 		g.currentDocData = combined
 		g.currentDocPath = fmt.Sprintf("%d documents selected", len(combined))
 		g.clearDetailsCache()
-		g.logCommand("api", fmt.Sprintf("Fetched %d documents", len(combined)), "success")
+		g.logCommand("api", fmt.Sprintf("Loaded %d documents", len(combined)), "success")
 	}
 
 	// Stay in select mode - only Esc exits
+	return g.Layout(g.g)
+}
+
+// Query builder action handlers
+
+// doOpenQuery opens the query builder modal
+func (g *Gui) doOpenQuery() error {
+	return g.openQueryModal()
+}
+
+// queryClose closes the query modal
+func (g *Gui) queryClose() error {
+	return g.closeQueryModal()
+}
+
+// queryMoveUp moves up in the query modal
+func (g *Gui) queryMoveUp() error {
+	if g.queryActiveRow == queryRowFilters && len(g.queryFilters) > 0 {
+		// In filters: move to previous filter, or wrap to buttons if at first
+		filterIdx := g.queryActiveCol / 4
+		colInFilter := g.queryActiveCol % 4
+		if filterIdx > 0 {
+			// Move to previous filter, keep same column within filter
+			g.queryActiveCol = (filterIdx-1)*4 + colInFilter
+			return g.Layout(g.g)
+		}
+	}
+	// Move to previous row
+	g.queryActiveRow--
+	if g.queryActiveRow < 0 {
+		g.queryActiveRow = queryRowButtons
+	}
+	// When entering filters from above, go to last filter
+	if g.queryActiveRow == queryRowFilters && len(g.queryFilters) > 0 {
+		g.queryActiveCol = (len(g.queryFilters) - 1) * 4
+	} else {
+		g.queryActiveCol = 0
+	}
+	return g.Layout(g.g)
+}
+
+// queryMoveDown moves down in the query modal
+func (g *Gui) queryMoveDown() error {
+	if g.queryActiveRow == queryRowFilters && len(g.queryFilters) > 0 {
+		// In filters: move to next filter, or to orderBy if at last
+		filterIdx := g.queryActiveCol / 4
+		colInFilter := g.queryActiveCol % 4
+		if filterIdx < len(g.queryFilters)-1 {
+			// Move to next filter, keep same column within filter
+			g.queryActiveCol = (filterIdx+1)*4 + colInFilter
+			return g.Layout(g.g)
+		}
+	}
+	// Move to next row
+	g.queryActiveRow++
+	if g.queryActiveRow > queryRowButtons {
+		g.queryActiveRow = queryRowFilters
+	}
+	g.queryActiveCol = 0
+	return g.Layout(g.g)
+}
+
+// queryMoveLeft moves left in the query modal
+func (g *Gui) queryMoveLeft() error {
+	g.queryActiveCol--
+	if g.queryActiveCol < 0 {
+		g.queryActiveCol = g.getMaxColForRow()
+	}
+	return g.Layout(g.g)
+}
+
+// queryMoveRight moves right in the query modal
+func (g *Gui) queryMoveRight() error {
+	g.queryActiveCol++
+	if g.queryActiveCol > g.getMaxColForRow() {
+		g.queryActiveCol = 0
+	}
+	return g.Layout(g.g)
+}
+
+// queryKeyJ handles j key in query modal (navigation only)
+func (g *Gui) queryKeyJ() error {
+	return g.queryMoveDown()
+}
+
+// queryKeyK handles k key in query modal (navigation only)
+func (g *Gui) queryKeyK() error {
+	return g.queryMoveUp()
+}
+
+// queryKeyH handles h key in query modal (navigation only)
+func (g *Gui) queryKeyH() error {
+	return g.queryMoveLeft()
+}
+
+// queryKeyL handles l key in query modal (navigation only)
+func (g *Gui) queryKeyL() error {
+	return g.queryMoveRight()
+}
+
+// queryNextField moves to the next field, wrapping to next row at end
+func (g *Gui) queryNextField() error {
+	maxCol := g.getMaxColForRow()
+
+	if g.queryActiveCol < maxCol {
+		// Move to next column in same row
+		g.queryActiveCol++
+	} else {
+		// Move to first column of next row
+		g.queryActiveCol = 0
+		g.queryActiveRow++
+		if g.queryActiveRow > queryRowButtons {
+			g.queryActiveRow = queryRowFilters
+		}
+	}
+
+	return g.Layout(g.g)
+}
+
+// queryEnter handles enter key in query modal
+func (g *Gui) queryEnter() error {
+	return g.handleQueryEnter()
+}
+
+// queryBackspace is no longer needed - editable view handles it
+func (g *Gui) queryBackspace() error {
+	return nil
+}
+
+// queryInsertChar is no longer needed for text input - editable view handles it
+// Only handles special action keys when not in edit mode
+func (g *Gui) queryInsertChar(ch rune) func() error {
+	return func() error {
+		switch ch {
+		case 'a':
+			g.addQueryFilter()
+			return g.Layout(g.g)
+		case 'd':
+			if g.queryActiveRow == queryRowFilters && len(g.queryFilters) > 0 {
+				g.removeQueryFilter()
+			}
+			return g.Layout(g.g)
+		}
+		return nil
+	}
+}
+
+// Query select popup handlers
+
+// querySelectMoveUp moves selection up in the select popup
+func (g *Gui) querySelectMoveUp() error {
+	if g.querySelectIdx > 0 {
+		g.querySelectIdx--
+	}
+	return g.Layout(g.g)
+}
+
+// querySelectMoveDown moves selection down in the select popup
+func (g *Gui) querySelectMoveDown() error {
+	if g.querySelectIdx < len(g.querySelectItems)-1 {
+		g.querySelectIdx++
+	}
+	return g.Layout(g.g)
+}
+
+// querySelectConfirm confirms selection and closes popup
+func (g *Gui) querySelectConfirm() error {
+	g.confirmQuerySelect()
+	return g.Layout(g.g)
+}
+
+// querySelectClose closes the select popup without selecting
+func (g *Gui) querySelectClose() error {
+	g.closeQuerySelect()
 	return g.Layout(g.g)
 }

@@ -52,6 +52,8 @@ type Gui struct {
 	treeNodes       []TreeNode
 	selectedTreeIdx int
 	expandedPaths   map[string]bool
+	docCache        map[string]map[string]any // Cache of fetched documents by path
+	collectionCache map[string][]string       // Cache of document paths per collection
 
 	// Details state
 	currentDocPath     string
@@ -80,6 +82,9 @@ type Gui struct {
 		help        string
 		modal       string
 		helpModal   string
+		queryModal  string
+		queryInput  string
+		querySelect string
 	}
 
 	// Current column: "projects", "collections", "tree", "details"
@@ -115,6 +120,26 @@ type Gui struct {
 	selectMode     bool
 	selectedDocs   map[int]bool // indices of selected tree nodes
 	selectStartIdx int          // where selection started
+
+	// Query builder state
+	queryModalOpen   bool
+	queryCollection  string // Collection path for query (can be subcollection)
+	queryNodeIdx     int    // Index of collection node in tree (-1 for top-level)
+	queryFilters     []firebase.QueryFilter
+	queryOrderBy     string
+	queryOrderDir    string // ASC or DESC
+	queryLimit       int
+	queryActiveRow   int    // Currently selected row in modal (0=filters, 1=orderBy, 2=limit, 3=buttons)
+	queryActiveCol   int    // Currently selected column/field in row
+	queryEditMode   bool   // True when editing a field value
+	queryEditBuffer string // Buffer for editing field value
+	queryResultMode bool   // True when showing query results instead of normal tree
+
+	// Query select popup state (for operators and types)
+	querySelectOpen     bool
+	querySelectItems    []string
+	querySelectIdx      int
+	querySelectCallback func(string) // Called when item is selected
 
 	// Frame styling
 	roundedFrameRunes []rune
@@ -166,8 +191,10 @@ func NewGui(config *config.Config, firebaseClient *firebase.Client, version stri
 		theme:          theme,
 		currentProject: firebaseClient.GetCurrentProject(),
 		currentColumn:  "projects",
-		expandedPaths:  make(map[string]bool),
-		selectedDocs:   make(map[int]bool),
+		expandedPaths:   make(map[string]bool),
+		selectedDocs:    make(map[int]bool),
+		docCache:        make(map[string]map[string]any),
+		collectionCache: make(map[string][]string),
 	}
 
 	// Set view names
@@ -179,6 +206,9 @@ func NewGui(config *config.Config, firebaseClient *firebase.Client, version stri
 	gui.views.help = "help"
 	gui.views.modal = "modal"
 	gui.views.helpModal = "helpModal"
+	gui.views.queryModal = "queryModal"
+	gui.views.queryInput = "queryInput"
+	gui.views.querySelect = "querySelect"
 	gui.views.background = "background"
 
 	// Configure gocui

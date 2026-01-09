@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/jesseduffield/gocui"
 )
@@ -97,6 +98,11 @@ func (g *Gui) selectCollection(gui *gocui.Gui) error {
 			g.treeNodes = nil
 			g.expandedPaths = make(map[string]bool)
 
+			// Cache all fetched documents
+			for _, doc := range docs {
+				g.docCache[doc.Path] = doc.Data
+			}
+
 			for _, doc := range docs {
 				node := TreeNode{
 					Path:        doc.Path,
@@ -141,22 +147,41 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 	if nodeType == "document" {
 		if node.Expanded {
 			g.collapseNode(nodeIdx)
-			node.Expanded = false
+			g.treeNodes[nodeIdx].Expanded = false
 			return nil
 		}
 
-		g.logCommand("api", fmt.Sprintf("GetDocument(%s) loading...", nodePath), "running")
-		g.detailsLoading = true
+		// Check cache for document data
+		cachedData, isCached := g.docCache[nodePath]
+		if isCached {
+			g.currentDocPath = nodePath
+			g.currentDocData = cachedData
+			g.clearDetailsCache()
+			g.logCommand("cache", fmt.Sprintf("Using cached %s", nodeName), "success")
+			// Don't return - still need to load subcollections
+		}
+
+		// Load subcollections (and document if not cached)
+		if !isCached {
+			g.logCommand("api", fmt.Sprintf("GetDocument(%s) loading...", nodePath), "running")
+			g.detailsLoading = true
+		}
 
 		go func() {
-			doc, err := g.firebaseClient.GetDocument(nodePath)
-			if err != nil {
-				g.g.Update(func(gui *gocui.Gui) error {
-					g.detailsLoading = false
-					g.logCommand("api", fmt.Sprintf("GetDocument failed: %v", err), "error")
-					return nil
-				})
-				return
+			var docData map[string]any
+			if isCached {
+				docData = cachedData
+			} else {
+				doc, err := g.firebaseClient.GetDocument(nodePath)
+				if err != nil {
+					g.g.Update(func(gui *gocui.Gui) error {
+						g.detailsLoading = false
+						g.logCommand("api", fmt.Sprintf("GetDocument failed: %v", err), "error")
+						return nil
+					})
+					return
+				}
+				docData = doc.Data
 			}
 
 			subcols, err := g.firebaseClient.ListSubcollections(nodePath)
@@ -164,10 +189,13 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 			g.g.Update(func(gui *gocui.Gui) error {
 				g.detailsLoading = false
 				g.currentDocPath = nodePath
-				g.currentDocData = doc.Data
+				g.currentDocData = docData
+				g.docCache[nodePath] = docData // Cache for future use
 
 				if err != nil || len(subcols) == 0 {
-					g.logCommand("api", fmt.Sprintf("GetDocument(%s) → loaded", nodeName), "success")
+					if !isCached {
+						g.logCommand("api", fmt.Sprintf("GetDocument(%s) → loaded", nodeName), "success")
+					}
 					return nil
 				}
 
@@ -194,7 +222,9 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 					}
 				}
 
-				g.logCommand("api", fmt.Sprintf("GetDocument(%s) → %d subcols", nodeName, len(subcols)), "success")
+				if !isCached {
+					g.logCommand("api", fmt.Sprintf("GetDocument(%s) → %d subcols", nodeName, len(subcols)), "success")
+				}
 				return nil
 			})
 		}()
@@ -202,7 +232,39 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 	} else if nodeType == "collection" {
 		if node.Expanded {
 			g.collapseNode(nodeIdx)
-			node.Expanded = false
+			g.treeNodes[nodeIdx].Expanded = false
+			return nil
+		}
+
+		// Check if collection contents are cached
+		if cachedPaths, ok := g.collectionCache[nodePath]; ok {
+			// Rebuild tree nodes from cache
+			if nodeIdx < len(g.treeNodes) {
+				newNodes := make([]TreeNode, 0, len(g.treeNodes)+len(cachedPaths))
+				newNodes = append(newNodes, g.treeNodes[:nodeIdx+1]...)
+
+				for _, docPath := range cachedPaths {
+					// Extract doc ID from path
+					parts := strings.Split(docPath, "/")
+					docID := parts[len(parts)-1]
+					docNode := TreeNode{
+						Path:        docPath,
+						Name:        docID,
+						Type:        "document",
+						Depth:       nodeDepth + 1,
+						HasChildren: true,
+						Expanded:    false,
+					}
+					newNodes = append(newNodes, docNode)
+				}
+
+				newNodes = append(newNodes, g.treeNodes[nodeIdx+1:]...)
+				g.treeNodes = newNodes
+				if nodeIdx < len(g.treeNodes) {
+					g.treeNodes[nodeIdx].Expanded = true
+				}
+			}
+			g.logCommand("cache", fmt.Sprintf("Using cached %s → %d docs", nodeName, len(cachedPaths)), "success")
 			return nil
 		}
 
@@ -223,6 +285,14 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 					g.logCommand("api", fmt.Sprintf("ListDocuments(%s) → empty", nodeName), "success")
 					return nil
 				}
+
+				// Cache document data and collection contents
+				var docPaths []string
+				for _, doc := range docs {
+					g.docCache[doc.Path] = doc.Data
+					docPaths = append(docPaths, doc.Path)
+				}
+				g.collectionCache[nodePath] = docPaths
 
 				if nodeIdx < len(g.treeNodes) {
 					newNodes := make([]TreeNode, 0, len(g.treeNodes)+len(docs))
@@ -326,12 +396,14 @@ func (g *Gui) buildHelpPopup() {
 	case "collections":
 		items = append(items,
 			PopupItem{Key: "Space", Label: "Load documents", Action: g.doSpace},
+			PopupItem{Key: "F", Label: "Query builder", Action: g.doOpenQuery},
 		)
 	case "tree":
 		items = append(items,
 			PopupItem{Key: "Space", Label: "Expand / Collapse", Action: g.doSpace},
 			PopupItem{Key: "Enter", Label: "Open in details", Action: g.doEnter},
 			PopupItem{Key: "v", Label: "Select mode (multi-select)", Action: g.doToggleSelectMode},
+			PopupItem{Key: "F", Label: "Query builder", Action: g.doOpenQuery},
 			PopupItem{Key: "c", Label: "Copy JSON to clipboard", Action: g.doCopyJSON},
 			PopupItem{Key: "s", Label: "Save JSON to Downloads", Action: g.doSaveJSON},
 		)

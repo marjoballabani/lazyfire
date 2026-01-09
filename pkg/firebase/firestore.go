@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,6 +22,22 @@ type Document struct {
 	ID   string                 // Document ID
 	Path string                 // Full path from root
 	Data map[string]interface{} // Document fields as a map
+}
+
+// QueryFilter represents a where clause in a Firestore query.
+type QueryFilter struct {
+	Field     string
+	Operator  string // EQUAL, NOT_EQUAL, LESS_THAN, LESS_THAN_OR_EQUAL, GREATER_THAN, GREATER_THAN_OR_EQUAL, ARRAY_CONTAINS, IN
+	Value     interface{}
+	ValueType string // string, integer, double, boolean, null (empty = auto-detect)
+}
+
+// QueryOptions contains all options for a Firestore query.
+type QueryOptions struct {
+	Filters  []QueryFilter
+	OrderBy  string
+	OrderDir string // ASCENDING or DESCENDING
+	Limit    int
 }
 
 // getFirebaseToken retrieves the OAuth access token from Firebase CLI config.
@@ -384,4 +401,252 @@ func extractFirestoreValue(field map[string]interface{}) interface{} {
 	}
 
 	return field
+}
+
+// RunQuery executes a structured query on a collection and returns matching documents.
+func (c *Client) RunQuery(collectionPath string, opts QueryOptions) ([]Document, error) {
+	if c.currentProject == "" {
+		return nil, fmt.Errorf("no project selected")
+	}
+
+	token, err := c.getFirebaseToken()
+	if err != nil {
+		return nil, err
+	}
+
+	// Build the structured query
+	query := buildStructuredQuery(collectionPath, opts)
+
+	reqData, err := json.Marshal(map[string]interface{}{
+		"structuredQuery": query,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents:runQuery", c.currentProject)
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(string(reqData)))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("query error %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse query results (array of objects with "document" field)
+	var results []struct {
+		Document struct {
+			Name   string                 `json:"name"`
+			Fields map[string]interface{} `json:"fields"`
+		} `json:"document"`
+		ReadTime string `json:"readTime"`
+	}
+
+	if err := json.Unmarshal(body, &results); err != nil {
+		return nil, fmt.Errorf("failed to parse query results: %v", err)
+	}
+
+	var documents []Document
+	for _, result := range results {
+		if result.Document.Name == "" {
+			continue // Skip empty results
+		}
+		parts := strings.Split(result.Document.Name, "/")
+		docID := parts[len(parts)-1]
+
+		documents = append(documents, Document{
+			ID:   docID,
+			Path: strings.Join(parts[5:], "/"),
+			Data: parseFirestoreFields(result.Document.Fields),
+		})
+	}
+
+	return documents, nil
+}
+
+// buildStructuredQuery constructs a Firestore structured query from QueryOptions.
+func buildStructuredQuery(collectionPath string, opts QueryOptions) map[string]interface{} {
+	// Extract collection ID from path (last segment)
+	parts := strings.Split(collectionPath, "/")
+	collectionID := parts[len(parts)-1]
+
+	query := map[string]interface{}{
+		"from": []map[string]interface{}{
+			{"collectionId": collectionID},
+		},
+	}
+
+	// Add where filters
+	if len(opts.Filters) > 0 {
+		if len(opts.Filters) == 1 {
+			query["where"] = buildFieldFilter(opts.Filters[0])
+		} else {
+			// Multiple filters need composite filter
+			var filters []map[string]interface{}
+			for _, f := range opts.Filters {
+				filters = append(filters, buildFieldFilter(f))
+			}
+			query["where"] = map[string]interface{}{
+				"compositeFilter": map[string]interface{}{
+					"op":      "AND",
+					"filters": filters,
+				},
+			}
+		}
+	}
+
+	// Add orderBy
+	if opts.OrderBy != "" {
+		dir := "ASCENDING"
+		if opts.OrderDir == "DESC" || opts.OrderDir == "DESCENDING" {
+			dir = "DESCENDING"
+		}
+		query["orderBy"] = []map[string]interface{}{
+			{
+				"field":     map[string]string{"fieldPath": opts.OrderBy},
+				"direction": dir,
+			},
+		}
+	}
+
+	// Add limit
+	if opts.Limit > 0 {
+		query["limit"] = opts.Limit
+	}
+
+	return query
+}
+
+// buildFieldFilter creates a field filter for a QueryFilter.
+func buildFieldFilter(f QueryFilter) map[string]interface{} {
+	return map[string]interface{}{
+		"fieldFilter": map[string]interface{}{
+			"field": map[string]string{"fieldPath": f.Field},
+			"op":    convertOperator(f.Operator),
+			"value": toFirestoreValue(f.Value, f.ValueType),
+		},
+	}
+}
+
+// convertOperator converts user-friendly operators to Firestore API operators.
+func convertOperator(op string) string {
+	switch op {
+	case "==", "EQUAL":
+		return "EQUAL"
+	case "!=", "NOT_EQUAL":
+		return "NOT_EQUAL"
+	case "<", "LESS_THAN":
+		return "LESS_THAN"
+	case "<=", "LESS_THAN_OR_EQUAL":
+		return "LESS_THAN_OR_EQUAL"
+	case ">", "GREATER_THAN":
+		return "GREATER_THAN"
+	case ">=", "GREATER_THAN_OR_EQUAL":
+		return "GREATER_THAN_OR_EQUAL"
+	case "in", "IN":
+		return "IN"
+	case "not-in", "NOT_IN":
+		return "NOT_IN"
+	case "array-contains", "ARRAY_CONTAINS":
+		return "ARRAY_CONTAINS"
+	case "array-contains-any", "ARRAY_CONTAINS_ANY":
+		return "ARRAY_CONTAINS_ANY"
+	default:
+		return "EQUAL"
+	}
+}
+
+// toFirestoreValue converts a Go value to Firestore's typed value format.
+// If valueType is specified (and not "auto"), it forces that type; otherwise auto-detects.
+func toFirestoreValue(v interface{}, valueType string) map[string]interface{} {
+	strVal := fmt.Sprintf("%v", v)
+
+	// If explicit type specified (not auto), convert accordingly
+	if valueType != "" && valueType != "auto" {
+		switch valueType {
+		case "string":
+			return map[string]interface{}{"stringValue": strVal}
+		case "integer":
+			return map[string]interface{}{"integerValue": strVal}
+		case "double":
+			return map[string]interface{}{"doubleValue": strVal}
+		case "boolean":
+			boolVal := strings.ToLower(strVal) == "true" || strVal == "1"
+			return map[string]interface{}{"booleanValue": boolVal}
+		case "null":
+			return map[string]interface{}{"nullValue": nil}
+		case "array":
+			return parseArrayValue(strVal)
+		}
+	}
+
+	// Auto-detect type from string value
+	strVal = strings.TrimSpace(strVal)
+
+	// Try null
+	if strVal == "null" || strVal == "" {
+		return map[string]interface{}{"nullValue": nil}
+	}
+
+	// Try boolean
+	lower := strings.ToLower(strVal)
+	if lower == "true" {
+		return map[string]interface{}{"booleanValue": true}
+	}
+	if lower == "false" {
+		return map[string]interface{}{"booleanValue": false}
+	}
+
+	// Try integer
+	if i, err := strconv.ParseInt(strVal, 10, 64); err == nil {
+		return map[string]interface{}{"integerValue": fmt.Sprintf("%d", i)}
+	}
+
+	// Try float
+	if f, err := strconv.ParseFloat(strVal, 64); err == nil {
+		return map[string]interface{}{"doubleValue": f}
+	}
+
+	// Default to string
+	return map[string]interface{}{"stringValue": strVal}
+}
+
+// parseArrayValue parses a comma-separated string into a Firestore arrayValue.
+// Each element is auto-typed (integers, booleans, etc. are detected).
+// Example: "a,b,c" -> arrayValue with 3 stringValues
+// Example: "1,2,3" -> arrayValue with 3 integerValues
+func parseArrayValue(s string) map[string]interface{} {
+	parts := strings.Split(s, ",")
+	var values []map[string]interface{}
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		// Auto-detect type for each element
+		values = append(values, toFirestoreValue(part, "auto"))
+	}
+
+	return map[string]interface{}{
+		"arrayValue": map[string]interface{}{
+			"values": values,
+		},
+	}
 }

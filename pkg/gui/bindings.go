@@ -6,11 +6,13 @@ import "github.com/jesseduffield/gocui"
 type Context string
 
 const (
-	ContextNormal  Context = "normal"
-	ContextFilter  Context = "filter"
-	ContextHelp    Context = "help"
-	ContextModal   Context = "modal"
-	ContextSelect  Context = "select" // Visual selection mode
+	ContextNormal      Context = "normal"
+	ContextFilter      Context = "filter"
+	ContextHelp        Context = "help"
+	ContextModal       Context = "modal"
+	ContextSelect      Context = "select"      // Visual selection mode
+	ContextQuery       Context = "query"       // Query builder modal
+	ContextQuerySelect Context = "querySelect" // Query select popup
 )
 
 // Binding represents a keybinding with context-aware handling
@@ -103,6 +105,12 @@ func (g *Gui) newDisabledReasons() DisabledReasons {
 
 // getContext returns the current UI context
 func (g *Gui) getContext() Context {
+	if g.querySelectOpen {
+		return ContextQuerySelect
+	}
+	if g.queryModalOpen {
+		return ContextQuery
+	}
 	if g.helpOpen {
 		return ContextHelp
 	}

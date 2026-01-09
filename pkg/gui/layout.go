@@ -65,7 +65,7 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 		if !errors.Is(err, gocui.ErrUnknownView) {
 			return err
 		}
-		v.Title = " " + icons.PROJECT_ICON + " Projects "
+		v.Title = " " + icons.FIREBASE_ICON + " Projects "
 		v.TitleColor = g.theme.InactiveBorderColor
 		v.BgColor = gocui.ColorDefault
 		v.FgColor = gocui.ColorDefault
@@ -86,17 +86,17 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 			gui.SelFgColor = g.theme.FilterBorderColor
 			v.TitleColor = g.theme.FilterBorderColor
 			v.FrameColor = g.theme.FilterBorderColor
-			v.Title = " " + icons.PROJECT_ICON + " Projects "
+			v.Title = " " + icons.FIREBASE_ICON + " Projects "
 		} else if isFocused {
 			gui.SelFrameColor = g.theme.ActiveBorderColor
 			gui.SelFgColor = g.theme.ActiveBorderColor
 			v.TitleColor = g.theme.ActiveBorderColor
 			v.FrameColor = g.theme.ActiveBorderColor
-			v.Title = " " + icons.PROJECT_ICON + " Projects "
+			v.Title = " " + icons.FIREBASE_ICON + " Projects "
 		} else {
 			v.TitleColor = g.theme.InactiveBorderColor
 			v.FrameColor = g.theme.InactiveBorderColor
-			v.Title = " " + icons.PROJECT_ICON + " Projects "
+			v.Title = " " + icons.FIREBASE_ICON + " Projects "
 		}
 		// Show footer only when expanded
 		hasFilter := hasCommittedFilter || isTypingFilter
@@ -197,7 +197,12 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 			v.TitleColor = g.theme.InactiveBorderColor
 			v.FrameColor = g.theme.InactiveBorderColor
 		}
-		v.Title = " " + icons.TREE_ICON + " Tree "
+		// Show query mode in title
+		if g.queryResultMode {
+			v.Title = " " + icons.TREE_ICON + " Query Results (Q to clear) "
+		} else {
+			v.Title = " " + icons.TREE_ICON + " Tree "
+		}
 		// Set footer with count
 		filtered := g.getFilteredTreeNodes()
 		hasFilter := hasCommittedFilter || isTypingFilter
@@ -284,6 +289,111 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 
 	if v, err := gui.View(g.views.help); err == nil {
 		g.updateHelpView(v)
+	}
+
+	// Query builder modal
+	if g.queryModalOpen {
+		modalWidth := 50
+		modalHeight := 20
+		if modalHeight > maxY-4 {
+			modalHeight = maxY - 4
+		}
+		modalX := (maxX - modalWidth) / 2
+		modalY := (maxY - modalHeight) / 2
+
+		if v, err := gui.SetView(g.views.queryModal, modalX, modalY, modalX+modalWidth, modalY+modalHeight, 0); err != nil {
+			if !errors.Is(err, gocui.ErrUnknownView) {
+				return err
+			}
+			v.Title = " Query Builder "
+			v.TitleColor = g.theme.ActiveBorderColor
+			v.FrameColor = g.theme.ActiveBorderColor
+			v.FrameRunes = g.roundedFrameRunes
+			v.BgColor = gocui.ColorDefault
+			v.FgColor = gocui.ColorDefault
+		}
+
+		if v, err := gui.View(g.views.queryModal); err == nil {
+			g.renderQueryModal(v)
+		}
+
+		// Create editable input view when in edit mode
+		if g.queryEditMode {
+			inputX := modalX + 2
+			inputY := modalY + modalHeight - 4
+			inputWidth := modalWidth - 4
+
+			if v, err := gui.SetView(g.views.queryInput, inputX, inputY, inputX+inputWidth, inputY+2, 0); err != nil {
+				if !errors.Is(err, gocui.ErrUnknownView) {
+					return err
+				}
+				v.Title = " " + g.getQueryEditFieldName() + " "
+				v.TitleColor = g.theme.ActiveBorderColor
+				v.FrameColor = g.theme.ActiveBorderColor
+				v.FrameRunes = g.roundedFrameRunes
+				v.Editable = true
+				v.Editor = gocui.EditorFunc(g.queryInputEditor)
+				// Initialize TextArea with current value
+				v.TextArea.Clear()
+				v.TextArea.TypeString(g.queryEditBuffer)
+				v.RenderTextArea()
+			}
+
+			if v, err := gui.View(g.views.queryInput); err == nil {
+				v.Title = " " + g.getQueryEditFieldName() + " "
+				gui.Cursor = true // Show cursor when editing
+				if _, err := gui.SetCurrentView(g.views.queryInput); err != nil {
+					return fmt.Errorf("failed to set query input view: %w", err)
+				}
+			}
+		} else {
+			gui.Cursor = false // Hide cursor when not editing
+			_ = gui.DeleteView(g.views.queryInput)
+		}
+
+		// Create select popup when selecting operator/type
+		if g.querySelectOpen {
+			selectWidth := 20
+			selectHeight := len(g.querySelectItems) + 2
+			if selectHeight > 12 {
+				selectHeight = 12
+			}
+			selectX := modalX + (modalWidth-selectWidth)/2
+			selectY := modalY + 4
+
+			if v, err := gui.SetView(g.views.querySelect, selectX, selectY, selectX+selectWidth, selectY+selectHeight, 0); err != nil {
+				if !errors.Is(err, gocui.ErrUnknownView) {
+					return err
+				}
+				v.Title = " Select "
+				v.TitleColor = g.theme.ActiveBorderColor
+				v.FrameColor = g.theme.ActiveBorderColor
+				v.FrameRunes = g.roundedFrameRunes
+				v.Highlight = true
+				v.SelBgColor = g.theme.SelectedLineBgColor
+				v.SelFgColor = gocui.ColorDefault
+			}
+
+			if v, err := gui.View(g.views.querySelect); err == nil {
+				g.renderQuerySelect(v)
+				if _, err := gui.SetCurrentView(g.views.querySelect); err != nil {
+					return fmt.Errorf("failed to set query select view: %w", err)
+				}
+			}
+		} else {
+			_ = gui.DeleteView(g.views.querySelect)
+			if !g.queryEditMode {
+				if _, err := gui.SetCurrentView(g.views.queryModal); err != nil {
+					return fmt.Errorf("failed to set query view: %w", err)
+				}
+			}
+		}
+
+		return nil
+	} else {
+		_ = gui.DeleteView(g.views.queryModal)
+		_ = gui.DeleteView(g.views.queryInput)
+		_ = gui.DeleteView(g.views.querySelect)
 	}
 
 	// Help modal (keyboard shortcuts)
@@ -403,10 +513,10 @@ func (g *Gui) updateProjectsView(v *gocui.View) {
 	// Enable highlight when this view is focused
 	v.Highlight = g.currentColumn == "projects" && len(filtered) > 0
 
-	// Project icon with spacing
-	icon := icons.PROJECT_ICON
+	// Project icon with spacing and orange color
+	icon := icons.FIREBASE_ICON
 	if icon != "" {
-		icon = icon + " "
+		icon = "\033[38;5;208m" + icon + "\033[0m " // Orange Firebase icon
 	}
 
 	// When collapsed (not focused), show only the selected project
@@ -459,7 +569,7 @@ func (g *Gui) updateCollectionsView(v *gocui.View) {
 	for _, col := range filtered {
 		icon := icons.COLLECTION_ICON
 		if icon != "" {
-			icon = icon + " "
+			icon = "\033[36m" + icon + "\033[0m " // Cyan folder icon
 		}
 		if col.Name == g.currentCollection {
 			fmt.Fprintf(v, "%s*\033[0m %s%s\n", g.getActiveColorCode(), icon, col.Name)
@@ -501,14 +611,24 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 		// Build indentation
 		indent := strings.Repeat("  ", node.Depth)
 
-		// Choose icon based on type and expanded state
+		// Arrow and icon based on type and expanded state
+		arrow := ""
 		icon := icons.DOCUMENT
+		iconColor := "\033[32m" // Green for documents
+		resetColor := "\033[0m"
+
 		if node.Type == "collection" {
+			iconColor = "\033[36m" // Cyan for collections
 			if node.Expanded {
+				arrow = " ▼ "
 				icon = icons.FOLDER_OPEN
 			} else {
+				arrow = " ▶ "
 				icon = icons.FOLDER_CLOSED
 			}
+		} else if node.Depth > 0 {
+			// Nested documents get spacing to align with arrows
+			arrow = "   "
 		}
 
 		// Add spacing after icon if present
@@ -523,19 +643,27 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 		}
 
 		// Determine marker: * for current doc, + for selected in select mode, space otherwise
-		marker := " "
+		marker := "  "
 		isSelected := g.selectMode && g.selectedDocs[i]
 		if isSelected {
-			marker = "\033[30;43m+\033[0m" // Black on yellow background for selected
+			marker = "\033[2;33m+ \033[0m" // Dim yellow + for selected
 		} else if node.Path == g.currentDocPath {
-			marker = g.getActiveColorCode() + "*" + "\033[0m"
+			marker = g.getActiveColorCode() + "* " + "\033[0m"
 		}
 
-		// Highlight selected items in select mode
+		// Check if document is cached
+		cachedIndicator := ""
+		if node.Type == "document" {
+			if _, ok := g.docCache[node.Path]; ok {
+				cachedIndicator = " \033[33m·\033[0m" // Yellow dot for cached
+			}
+		}
+
+		// Format: marker + indent + connector + arrow + colored_icon + name + cachedIndicator
 		if isSelected {
-			fmt.Fprintf(v, "%s%s%s%s\033[33m%s\033[0m\n", marker, indent, connector, icon, node.Name)
+			fmt.Fprintf(v, "%s%s%s%s%s%s%s\033[33m%s\033[0m%s\n", marker, indent, connector, arrow, iconColor, icon, resetColor, node.Name, cachedIndicator)
 		} else {
-			fmt.Fprintf(v, "%s%s%s%s%s\n", marker, indent, connector, icon, node.Name)
+			fmt.Fprintf(v, "%s%s%s%s%s%s%s%s%s\n", marker, indent, connector, arrow, iconColor, icon, resetColor, node.Name, cachedIndicator)
 		}
 	}
 
@@ -735,22 +863,25 @@ func (g *Gui) showTreeNodeDetails(v *gocui.View) {
 
 func (g *Gui) showWelcome(v *gocui.View) {
 	fmt.Fprintln(v, "")
-	fmt.Fprintln(v, "\033[33m           ,")
-	fmt.Fprintln(v, "\033[33m          /|\\")
-	fmt.Fprintln(v, "\033[33m         / | \\")
-	fmt.Fprintln(v, "\033[38;5;208m        /  |  \\")
-	fmt.Fprintln(v, "\033[38;5;208m       /   |   \\")
-	fmt.Fprintln(v, "\033[38;5;196m      /    |    \\")
-	fmt.Fprintln(v, "\033[38;5;196m     /     |     \\")
-	fmt.Fprintln(v, "\033[38;5;196m    (      |      )")
-	fmt.Fprintln(v, "\033[38;5;208m     \\     |     /")
-	fmt.Fprintln(v, "\033[33m      \\    |    /")
-	fmt.Fprintln(v, "\033[33m       \\   |   /")
-	fmt.Fprintln(v, "\033[0m        \\__|__/")
+	fmt.Fprintln(v, "\033[33m            ▄")
+	fmt.Fprintln(v, "\033[33m           ▄█▄")
+	fmt.Fprintln(v, "\033[33m          ▄███▄")
+	fmt.Fprintln(v, "\033[38;5;208m         ▄█▀▀▀█▄")
+	fmt.Fprintln(v, "\033[38;5;208m        ▄█▀   ▀█▄")
+	fmt.Fprintln(v, "\033[38;5;196m       ▄█▀     ▀█▄")
+	fmt.Fprintln(v, "\033[38;5;196m      ▄█▀  ▄▄▄  ▀█▄")
+	fmt.Fprintln(v, "\033[38;5;196m      █▀  ▄█▀█▄  ▀█")
+	fmt.Fprintln(v, "\033[38;5;208m      █  ▄█▀ ▀█▄  █")
+	fmt.Fprintln(v, "\033[38;5;208m      ▀█▄▀     ▀▄█▀")
+	fmt.Fprintln(v, "\033[33m        ▀▀▄▄▄▄▄▀▀\033[0m")
 	fmt.Fprintln(v, "")
-	fmt.Fprintf(v, "\033[36m  %s  L A Z Y F I R E\033[0m\n", icons.FIREBASE_ICON)
+	fmt.Fprintf(v, "\033[38;5;208m     %s  L A Z Y F I R E\033[0m\n", icons.FIREBASE_ICON)
+	fmt.Fprintf(v, "\033[90m          v%s\033[0m\n", g.version)
 	fmt.Fprintln(v, "")
-	fmt.Fprintln(v, "\033[90m   Select a project to start\033[0m")
+	fmt.Fprintln(v, "\033[90m     Select a project to start\033[0m")
+	fmt.Fprintln(v, "")
+	fmt.Fprintln(v, "\033[90m     Created by Marjo Ballabani\033[0m")
+	fmt.Fprintln(v, "\033[36m     github.com/marjoballabani/lazyfire\033[0m")
 }
 
 func (g *Gui) updateCommandsView(v *gocui.View) {
@@ -824,7 +955,7 @@ func (g *Gui) updateHelpView(v *gocui.View) {
 		return
 	}
 
-	helpText := " \033[36m←/→\033[0m cols  \033[36mj/k\033[0m move  \033[33mspace\033[0m select  \033[32mc\033[0m copy  \033[32ms\033[0m save  \033[35m/\033[0m filter  \033[35m?\033[0m help  \033[31mq\033[0m quit"
+	helpText := " \033[36m←/→\033[0m cols  \033[36mj/k\033[0m move  \033[33mspace\033[0m select  \033[32mc\033[0m copy  \033[32ms\033[0m save  \033[35m/\033[0m filter  \033[33mQ\033[0m query  \033[35m?\033[0m help  \033[31mq\033[0m quit"
 	versionText := fmt.Sprintf("\033[90mv%s\033[0m ", g.version)
 
 	// Calculate padding to right-align version
