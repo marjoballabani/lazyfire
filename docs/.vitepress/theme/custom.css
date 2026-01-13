@@ -1,0 +1,309 @@
+/* LazyFire Custom Theme */
+
+:root {
+  --vp-c-brand-1: #ff6f00;
+  --vp-c-brand-2: #ff9800;
+  --vp-c-brand-3: #ffb74d;
+  --vp-c-brand-soft: rgba(255, 111, 0, 0.14);
+
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(135deg, #ff6f00 0%, #ffca28 100%);
+
+  --vp-home-hero-image-background-image: linear-gradient(135deg, #ff6f00 30%, #ffca28 70%);
+  --vp-home-hero-image-filter: blur(68px);
+}
+
+.dark {
+  --vp-c-bg: #1a1a1a;
+  --vp-c-bg-soft: #242424;
+  --vp-c-bg-mute: #2e2e2e;
+}
+
+/* Hero section enhancements */
+.VPHero .image-container {
+  width: 320px !important;
+  height: 320px !important;
+  transform: translateY(-40px);
+}
+
+.VPHero .image-container img {
+  width: 280px !important;
+  height: 280px !important;
+  max-width: none !important;
+}
+
+.VPHero .name {
+  font-size: 4rem !important;
+  line-height: 1.1 !important;
+}
+
+.VPHero .text {
+  font-size: 2.5rem !important;
+  background: linear-gradient(135deg, #f5f5f5 0%, #a0a0a0 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.dark .VPHero .text {
+  background: linear-gradient(135deg, #ffffff 0%, #a0a0a0 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.VPHero .tagline {
+  font-size: 1.3rem !important;
+  color: var(--vp-c-text-2);
+}
+
+/* Feature cards */
+.VPFeatures {
+  padding: 2rem 0 4rem !important;
+}
+
+.VPFeature {
+  border-radius: 20px !important;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  border: 1px solid transparent !important;
+  background: linear-gradient(135deg, var(--vp-c-bg-soft) 0%, var(--vp-c-bg-mute) 100%) !important;
+  position: relative;
+  overflow: hidden;
+}
+
+.VPFeature::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #ff6f00, #ffca28);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.VPFeature:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 20px 40px rgba(255, 111, 0, 0.15), 0 8px 16px rgba(0, 0, 0, 0.1);
+  border-color: rgba(255, 111, 0, 0.3) !important;
+}
+
+.VPFeature:hover::before {
+  opacity: 1;
+}
+
+.VPFeature .box {
+  padding: 28px 24px !important;
+}
+
+.VPFeature .icon {
+  width: 48px !important;
+  height: 48px !important;
+  margin-bottom: 16px;
+  padding: 10px;
+  background: linear-gradient(135deg, rgba(255, 111, 0, 0.1) 0%, rgba(255, 202, 40, 0.1) 100%);
+  border-radius: 12px;
+}
+
+.VPFeature .title {
+  font-weight: 700 !important;
+  font-size: 1.15rem !important;
+  margin-bottom: 8px !important;
+  color: var(--vp-c-text-1) !important;
+}
+
+.VPFeature .details {
+  font-size: 0.95rem !important;
+  line-height: 1.6 !important;
+  color: var(--vp-c-text-2) !important;
+}
+
+/* Action buttons */
+.VPButton.brand {
+  background: linear-gradient(135deg, #ff6f00 0%, #ff9800 100%) !important;
+  border: none !important;
+  font-weight: 600 !important;
+  transition: all 0.3s ease !important;
+}
+
+.VPButton.brand:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(255, 111, 0, 0.3);
+}
+
+.VPButton.alt {
+  border: 2px solid var(--vp-c-brand-1) !important;
+  color: var(--vp-c-brand-1) !important;
+  font-weight: 600 !important;
+  transition: all 0.3s ease !important;
+}
+
+.VPButton.alt:hover {
+  background: var(--vp-c-brand-soft) !important;
+  transform: translateY(-2px);
+}
+
+/* Preview section */
+.preview-container {
+  margin: 3rem auto;
+  max-width: 900px;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--vp-c-divider);
+}
+
+.preview-container img {
+  width: 100%;
+  display: block;
+}
+
+/* Install tabs styling */
+.install-section {
+  margin: 2rem 0;
+}
+
+.install-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.install-tab {
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.install-tab:hover,
+.install-tab.active {
+  background: var(--vp-c-brand-soft);
+  border-color: var(--vp-c-brand-1);
+}
+
+/* Code blocks */
+.vp-doc div[class*="language-"] {
+  border-radius: 12px;
+  border: 1px solid var(--vp-c-divider);
+}
+
+/* Custom home content */
+.home-content {
+  max-width: 1152px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.home-content h2 {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+/* Hero badges - above features */
+.badges-hero {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: -2rem auto 3rem;
+  max-width: 600px;
+  padding: 0 24px;
+}
+
+.badge-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, var(--vp-c-bg-soft) 0%, var(--vp-c-bg-mute) 100%);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  text-decoration: none;
+  transition: all 0.3s ease;
+}
+
+.badge-link:hover {
+  transform: translateY(-2px);
+  border-color: var(--vp-c-brand-1);
+  box-shadow: 0 8px 16px rgba(255, 111, 0, 0.1);
+}
+
+.badge-icon {
+  font-size: 1.1rem;
+}
+
+.badge-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--vp-c-text-2);
+}
+
+.badge-link img {
+  height: 20px;
+}
+
+/* Stats badges */
+.stats-badges {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: 2rem 0;
+}
+
+.stats-badges img {
+  height: 24px;
+}
+
+/* Why LazyFire section */
+.why-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0 3rem;
+}
+
+.why-card {
+  background: linear-gradient(135deg, var(--vp-c-bg-soft) 0%, var(--vp-c-bg-mute) 100%);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 16px;
+  padding: 1.5rem;
+  text-align: center;
+  transition: all 0.3s ease;
+}
+
+.why-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(255, 111, 0, 0.3);
+  box-shadow: 0 12px 24px rgba(255, 111, 0, 0.1);
+}
+
+.why-icon {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 0.75rem;
+  display: block;
+}
+
+.why-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--vp-c-text-1);
+  margin-bottom: 0.5rem;
+}
+
+.why-desc {
+  font-size: 0.875rem;
+  color: var(--vp-c-text-2);
+  line-height: 1.5;
+}
+
+/* Footer enhancement */
+.VPFooter {
+  border-top: 1px solid var(--vp-c-divider);
+}

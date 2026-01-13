@@ -39,9 +39,15 @@ Thumbs.db
 .env.local
 
 # Firebase credentials
-*.json
 firebase-credentials.json
 service-account.json
+*-credentials.json
+*-service-account.json
+
+# Docs
+docs/node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
 
 # Wiki (separate repo)
 lazyfire.wiki/
