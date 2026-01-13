@@ -78,35 +78,37 @@ lazyfire
 
 ## Preview
 
-<div class="preview-container">
-  <img src="/preview.gif" alt="LazyFire Preview" />
-</div>
+![LazyFire Preview](/preview.gif){.preview-img}
 
 ## Why LazyFire?
 
+<script setup>
+import { withBase } from 'vitepress'
+</script>
+
 <div class="why-grid">
   <div class="why-card">
-    <img src="/icons/rocket.svg" class="why-icon" alt="">
+    <img :src="withBase('/icons/rocket.svg')" class="why-icon" alt="">
     <div class="why-title">No context switching</div>
     <div class="why-desc">Stay in your terminal while debugging Firebase</div>
   </div>
   <div class="why-card">
-    <img src="/icons/zap.svg" class="why-icon" alt="">
+    <img :src="withBase('/icons/zap.svg')" class="why-icon" alt="">
     <div class="why-title">Fast navigation</div>
     <div class="why-desc">Vim-style keys mean muscle memory works here too</div>
   </div>
   <div class="why-card">
-    <img src="/icons/radio.svg" class="why-icon" alt="">
+    <img :src="withBase('/icons/radio.svg')" class="why-icon" alt="">
     <div class="why-title">Real-time logs</div>
     <div class="why-desc">Stream Cloud Function logs without opening the console</div>
   </div>
   <div class="why-card">
-    <img src="/icons/filter.svg" class="why-icon" alt="">
+    <img :src="withBase('/icons/filter.svg')" class="why-icon" alt="">
     <div class="why-title">Query power</div>
     <div class="why-desc">Build and execute Firestore queries interactively</div>
   </div>
   <div class="why-card">
-    <img src="/icons/sparkles.svg" class="why-icon" alt="">
+    <img :src="withBase('/icons/sparkles.svg')" class="why-icon" alt="">
     <div class="why-title">Zero config</div>
     <div class="why-desc">Uses your existing firebase login credentials</div>
   </div>

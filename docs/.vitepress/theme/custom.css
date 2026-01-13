@@ -158,6 +158,15 @@
   display: block;
 }
 
+.preview-img {
+  display: block;
+  margin: 3rem auto;
+  max-width: 900px;
+  border-radius: 16px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--vp-c-divider);
+}
+
 /* Install tabs styling */
 .install-section {
   margin: 2rem 0;
