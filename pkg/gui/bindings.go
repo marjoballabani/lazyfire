@@ -120,7 +120,7 @@ func (g *Gui) getContext() Context {
 	if g.filterInputActive {
 		return ContextFilter
 	}
-	if g.selectMode {
+	if g.selectMode && g.currentColumn == "tree" {
 		return ContextSelect
 	}
 	return ContextNormal

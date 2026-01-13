@@ -31,13 +31,21 @@ func (g *Gui) selectProject(gui *gocui.Gui) error {
 	}
 
 	selectedProject := filtered[g.selectedProjectIndex]
-	g.logCommand("api", fmt.Sprintf("ListCollections(%s) loading...", selectedProject.ID), "running")
-	g.collectionsLoading = true
+	loadFunctions := g.collectionsTab == "functions"
+
+	if loadFunctions {
+		g.logCommand("api", fmt.Sprintf("ListFunctions(%s) loading...", selectedProject.ID), "running")
+		g.functionsLoading = true
+	} else {
+		g.logCommand("api", fmt.Sprintf("ListCollections(%s) loading...", selectedProject.ID), "running")
+		g.collectionsLoading = true
+	}
 
 	go func() {
 		if err := g.firebaseClient.SetCurrentProject(selectedProject.ID); err != nil {
 			g.g.Update(func(gui *gocui.Gui) error {
 				g.collectionsLoading = false
+				g.functionsLoading = false
 				g.logCommand("api", fmt.Sprintf("SetProject failed: %v", err), "error")
 				return nil
 			})
@@ -45,6 +53,7 @@ func (g *Gui) selectProject(gui *gocui.Gui) error {
 		}
 
 		g.currentProject = selectedProject.ID
+		// Clear collections state
 		g.collections = nil
 		g.treeNodes = nil
 		g.currentDocData = nil
@@ -52,21 +61,32 @@ func (g *Gui) selectProject(gui *gocui.Gui) error {
 		g.currentDocPath = ""
 		g.selectedCollectionIdx = 0
 		g.selectedTreeIdx = 0
+		// Clear functions state
+		g.stopLogsRefresh()
+		g.functions = nil
+		g.currentFunction = nil
+		g.functionLogs = nil
+		g.selectedFunctionIdx = 0
 
-		if err := g.loadCollections(); err != nil {
+		// Load based on active tab
+		if loadFunctions {
+			g.loadFunctions()
+		} else {
+			if err := g.loadCollections(); err != nil {
+				g.g.Update(func(gui *gocui.Gui) error {
+					g.collectionsLoading = false
+					g.logCommand("api", fmt.Sprintf("ListCollections failed: %v", err), "error")
+					return nil
+				})
+				return
+			}
+
 			g.g.Update(func(gui *gocui.Gui) error {
 				g.collectionsLoading = false
-				g.logCommand("api", fmt.Sprintf("ListCollections failed: %v", err), "error")
+				g.logCommand("api", fmt.Sprintf("ListCollections(%s) → %d collections", selectedProject.ID, len(g.collections)), "success")
 				return nil
 			})
-			return
 		}
-
-		g.g.Update(func(gui *gocui.Gui) error {
-			g.collectionsLoading = false
-			g.logCommand("api", fmt.Sprintf("ListCollections(%s) → %d collections", selectedProject.ID, len(g.collections)), "success")
-			return nil
-		})
 	}()
 
 	return nil
@@ -76,6 +96,12 @@ func (g *Gui) selectCollection(gui *gocui.Gui) error {
 	filtered := g.getFilteredCollections()
 	if g.selectedCollectionIdx >= len(filtered) {
 		return nil
+	}
+
+	// Clear select mode - tree will show different documents
+	if g.selectMode {
+		g.selectMode = false
+		g.selectedDocs = make(map[int]bool)
 	}
 
 	collection := filtered[g.selectedCollectionIdx]
@@ -326,6 +352,30 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 	return nil
 }
 
+func (g *Gui) selectFunction(gui *gocui.Gui) error {
+	filtered := g.getFilteredFunctions()
+	if g.selectedFunctionIdx >= len(filtered) {
+		return nil
+	}
+
+	selectedFunc := filtered[g.selectedFunctionIdx]
+	isSameFunction := g.currentFunction != nil && g.currentFunction.Name == selectedFunc.Name
+
+	g.currentFunction = &selectedFunc
+	g.clearDetailsCache()
+
+	// Only fetch logs if selecting a different function or no logs yet (and not already loading)
+	if !isSameFunction {
+		g.functionLogs = nil
+		g.loadFunctionLogs()
+	} else if len(g.functionLogs) == 0 && !g.logsLoading {
+		g.loadFunctionLogs()
+	}
+
+	g.logCommand("functions", fmt.Sprintf("Selected %s", selectedFunc.DisplayName), "success")
+	return nil
+}
+
 func (g *Gui) fetchProjectDetails(gui *gocui.Gui) error {
 	filtered := g.getFilteredProjects()
 	if g.selectedProjectIndex >= len(filtered) {
@@ -395,7 +445,8 @@ func (g *Gui) buildHelpPopup() {
 		)
 	case "collections":
 		items = append(items,
-			PopupItem{Key: "Space", Label: "Load documents", Action: g.doSpace},
+			PopupItem{Key: "[ / ]", Label: "Switch Collections/Functions", Action: g.doSwitchTab},
+			PopupItem{Key: "Space", Label: "Load documents/Select function", Action: g.doSpace},
 			PopupItem{Key: "F", Label: "Query builder", Action: g.doOpenQuery},
 		)
 	case "tree":
@@ -408,6 +459,10 @@ func (g *Gui) buildHelpPopup() {
 			PopupItem{Key: "s", Label: "Save JSON to Downloads", Action: g.doSaveJSON},
 		)
 	case "details":
+		// Show [ / ] only when Functions tab is active
+		if g.collectionsTab == "functions" {
+			items = append(items, PopupItem{Key: "[ / ]", Label: "Switch Details/Logs", Action: g.doSwitchTab})
+		}
 		items = append(items,
 			PopupItem{Key: "j/k", Label: "Scroll content"},
 			PopupItem{Key: "Esc", Label: "Go back"},

@@ -20,8 +20,13 @@ func (g *Gui) commitFilter(gui *gocui.Gui) error {
 		g.projectsFilter = filterText
 		g.selectedProjectIndex = 0 // Reset to first filtered item
 	case "collections":
-		g.collectionsFilter = filterText
-		g.selectedCollectionIdx = 0
+		if g.collectionsTab == "functions" {
+			g.functionsFilter = filterText
+			g.selectedFunctionIdx = 0
+		} else {
+			g.collectionsFilter = filterText
+			g.selectedCollectionIdx = 0
+		}
 	case "tree":
 		g.treeFilter = filterText
 		g.selectedTreeIdx = 0
@@ -48,6 +53,9 @@ func (g *Gui) getFilterForPanel(panel string) string {
 	case "projects":
 		return g.projectsFilter
 	case "collections":
+		if g.collectionsTab == "functions" {
+			return g.functionsFilter
+		}
 		return g.collectionsFilter
 	case "tree":
 		return g.treeFilter
@@ -67,8 +75,13 @@ func (g *Gui) clearCurrentFilter(gui *gocui.Gui) error {
 		g.projectsFilter = ""
 		g.selectedProjectIndex = 0
 	case "collections":
-		g.collectionsFilter = ""
-		g.selectedCollectionIdx = 0
+		if g.collectionsTab == "functions" {
+			g.functionsFilter = ""
+			g.selectedFunctionIdx = 0
+		} else {
+			g.collectionsFilter = ""
+			g.selectedCollectionIdx = 0
+		}
 	case "tree":
 		g.treeFilter = ""
 		g.selectedTreeIdx = 0
@@ -140,6 +153,24 @@ func (g *Gui) getFilteredCollections() []firebase.Collection {
 	for _, c := range g.collections {
 		if g.matchesFilter(c.Name, filter) {
 			filtered = append(filtered, c)
+		}
+	}
+	return filtered
+}
+
+// getFilteredFunctions returns functions matching the current filter
+func (g *Gui) getFilteredFunctions() []firebase.CloudFunction {
+	filter := g.functionsFilter
+	if g.filterInputActive && g.filterInputPanel == "collections" && g.collectionsTab == "functions" {
+		filter = g.filterInputText
+	}
+	if filter == "" {
+		return g.functions
+	}
+	var filtered []firebase.CloudFunction
+	for _, f := range g.functions {
+		if g.matchesFilter(f.DisplayName, filter) || g.matchesFilter(f.Region, filter) {
+			filtered = append(filtered, f)
 		}
 	}
 	return filtered

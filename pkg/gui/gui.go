@@ -48,6 +48,17 @@ type Gui struct {
 	selectedCollectionIdx int
 	currentCollection     string
 
+	// Collections/Functions tab state
+	collectionsTab      string // "collections" or "functions"
+	functions           []firebase.CloudFunction
+	selectedFunctionIdx int
+	functionsFilter     string
+	currentFunction     *firebase.CloudFunction
+	functionLogs        []firebase.LogEntry
+	functionsLoading    bool
+	logsLoading         bool
+	logsRefreshTicker   *time.Ticker
+
 	// Tree state
 	treeNodes       []TreeNode
 	selectedTreeIdx int
@@ -60,6 +71,7 @@ type Gui struct {
 	currentDocData     map[string]any
 	currentProjectInfo *firebase.ProjectDetails
 	detailsScrollPos   int
+	detailsTab         string // "details" or "logs"
 
 	// Cached rendered content (avoid re-rendering on every Layout)
 	cachedDetailsContent string
@@ -191,6 +203,8 @@ func NewGui(config *config.Config, firebaseClient *firebase.Client, version stri
 		theme:          theme,
 		currentProject: firebaseClient.GetCurrentProject(),
 		currentColumn:  "projects",
+		collectionsTab: "collections",
+		detailsTab:     "details",
 		expandedPaths:   make(map[string]bool),
 		selectedDocs:    make(map[int]bool),
 		docCache:        make(map[string]map[string]any),
@@ -365,5 +379,65 @@ func (g *Gui) getLoadingText(text string) string {
 
 // isAnyLoading returns true if any panel is currently loading
 func (g *Gui) isAnyLoading() bool {
-	return g.isLoading || g.collectionsLoading || g.treeLoading || g.detailsLoading
+	return g.isLoading || g.collectionsLoading || g.treeLoading || g.detailsLoading || g.functionsLoading || g.logsLoading
+}
+
+// loadFunctions loads Cloud Functions for the current project
+func (g *Gui) loadFunctions() {
+	g.functionsLoading = true
+	go func() {
+		functions, err := g.firebaseClient.ListFunctions()
+		g.g.Update(func(gui *gocui.Gui) error {
+			g.functionsLoading = false
+			if err != nil {
+				g.logCommand("functions", fmt.Sprintf("Error: %v", err), "error")
+				return nil
+			}
+			g.functions = functions
+			g.selectedFunctionIdx = 0
+			g.logCommand("functions", fmt.Sprintf("Loaded %d functions", len(functions)), "success")
+			return nil
+		})
+	}()
+}
+
+// loadFunctionLogs loads logs for the current function
+func (g *Gui) loadFunctionLogs() {
+	if g.currentFunction == nil {
+		return
+	}
+	g.logsLoading = true
+	go func() {
+		logs, err := g.firebaseClient.GetFunctionLogs(g.currentFunction.DisplayName, 50)
+		g.g.Update(func(gui *gocui.Gui) error {
+			g.logsLoading = false
+			if err != nil {
+				g.logCommand("logs", fmt.Sprintf("Error: %v", err), "error")
+				return nil
+			}
+			g.functionLogs = logs
+			return nil
+		})
+	}()
+}
+
+// startLogsRefresh starts auto-refreshing logs every 3 seconds
+func (g *Gui) startLogsRefresh() {
+	g.stopLogsRefresh() // Stop any existing ticker
+	g.logsRefreshTicker = time.NewTicker(3 * time.Second)
+	go func() {
+		for range g.logsRefreshTicker.C {
+			if g.currentFunction != nil && g.collectionsTab == "functions" {
+				g.loadFunctionLogs()
+			}
+		}
+	}()
+}
+
+// stopLogsRefresh stops the auto-refresh ticker
+func (g *Gui) stopLogsRefresh() {
+	if g.logsRefreshTicker != nil {
+		g.logsRefreshTicker.Stop()
+		g.logsRefreshTicker = nil
+	}
 }

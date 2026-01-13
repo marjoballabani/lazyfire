@@ -176,6 +176,29 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 				ContextQuery:  g.queryNextField,
 			},
 		},
+		// [ and ] - switch Collections/Functions tabs
+		{
+			Key:         '[',
+			Handler:     g.doSwitchTab,
+			Description: "Switch to Collections/Functions",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.filterInsertBracketLeft,
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('['),
+			},
+		},
+		{
+			Key:         ']',
+			Handler:     g.doSwitchTab,
+			Description: "Switch to Collections/Functions",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.filterInsertBracketRight,
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar(']'),
+			},
+		},
 		// Space - context aware
 		{
 			Key:         gocui.KeySpace,
@@ -235,10 +258,10 @@ func (g *Gui) filterBindings(km *KeybindingManager) []*Binding {
 	}
 
 	// Character handlers for filter input (includes jq syntax chars)
-	// Exclude chars that have dedicated context-aware bindings: hjkl, csrqveFQ, ?@/
+	// Exclude chars that have dedicated context-aware bindings: hjkl, csrqveFQ, ?@/, []
 	filterChars := "abdfgimnoptuwxyzABCDEGHIJKLMNOPRSTUVWXYZ0123456789"
 	filterChars += "-_. "
-	filterChars += "[]|(){}:\"'`,<>=!+*^$#~;&%\\"
+	filterChars += "|(){}:\"'`,<>=!+*^$#~;&%\\"
 	for _, ch := range filterChars {
 		c := ch // capture for closure
 		bindings = append(bindings, &Binding{

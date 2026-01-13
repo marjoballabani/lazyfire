@@ -11,12 +11,13 @@ A terminal UI for browsing Firebase Firestore, inspired by [lazygit](https://git
 - Browse Firestore collections and documents
 - Expandable tree view for nested subcollections
 - View document data as syntax-highlighted JSON
-- Filter/search across all panels
+- **Cloud Functions Browser** - View functions, details, and live logs with `[` / `]` tabs
 - **Query Builder** - Interactive Firestore query builder with WHERE, ORDER BY, LIMIT
 - **jq query support** for filtering JSON in details panel
 - **Visual select mode** for multi-document selection and parallel fetching
 - **Smart caching** - Documents and collections cached with visual indicator
 - **Document stats** with Firestore limits validation (size, fields, depth)
+- Filter/search across all panels
 - Vim-style keybindings (h/j/k/l)
 - Mouse support (click to select, navigate)
 - Customizable theme (hex colors, 256-color, bold)
@@ -72,9 +73,9 @@ Download pre-built binaries from the [releases page](https://github.com/marjobal
 
 **Panels:**
 - **Projects** - Your Firebase projects
-- **Collections** - Root collections in selected project
+- **Collections** - Root collections or Cloud Functions (switch with `[` / `]`)
 - **Tree** - Documents and subcollections (expandable)
-- **Details** - Document JSON data with syntax highlighting
+- **Details** - Document JSON / Function details / Logs (switch with `[` / `]` in Functions view)
 - **Commands** - API call status
 
 ## Keybindings
@@ -86,6 +87,7 @@ Download pre-built binaries from the [releases page](https://github.com/marjobal
 | `j` `↓` | Move down in list |
 | `k` `↑` | Move up in list |
 | `Tab` | Go to details panel |
+| `[` `]` | Switch tabs (Collections/Functions, Details/Logs) |
 | `Enter` | Open document in details / Fetch project info |
 | `Space` | Select / Expand / Collapse (fetch selected in select mode) |
 | `v` | Toggle select mode (tree panel) |
@@ -95,7 +97,7 @@ Download pre-built binaries from the [releases page](https://github.com/marjobal
 | `s` | Save JSON to ~/Downloads (respects jq filter) |
 | `e` | Open in external editor (details panel) |
 | `Esc` | Back: close popup / cancel filter / clear filter / exit select mode |
-| `r` | Refresh |
+| `r` | Refresh (also refreshes logs in Functions view) |
 | `?` | Show keyboard shortcuts |
 | `@` | Show command history |
 | `q` | Quit |

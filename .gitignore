@@ -42,3 +42,6 @@ Thumbs.db
 *.json
 firebase-credentials.json
 service-account.json
+
+# Wiki (separate repo)
+lazyfire.wiki/

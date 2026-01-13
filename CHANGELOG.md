@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.35] - 2025-01-13
+
+### Added
+- **Cloud Functions Browser** - View and monitor Cloud Functions for your Firebase projects
+  - New **Functions tab** in Collections panel - press `[` / `]` to switch between Collections and Functions
+  - View function details: name, status, runtime, region, memory, timeout, trigger type, URL
+  - **Live Logs** - View function logs with color-coded severity (INFO/WARNING/ERROR/DEBUG)
+  - **Details/Logs tabs** in Details panel when viewing Functions - press `[` / `]` to switch
+  - Press `r` to refresh logs manually
+  - Function state preserved when switching tabs
+- **Separate details state per context** - Details panel remembers what you were viewing:
+  - Collections/Tree context → shows document data
+  - Functions context → shows function details/logs
+  - Switching between contexts automatically swaps the Details view
+- **Context-aware help popup** - `[` / `]` keybinding now shows per-panel descriptions
+
+### Changed
+- Select mode now only applies when focused on Tree panel (preserves selection when navigating)
+- Selecting a different collection clears select mode (tree content changes)
+- Tab switching (`[` / `]`) behavior is now panel-specific:
+  - Collections panel: Switch Collections/Functions tabs
+  - Details panel: Switch Details/Logs tabs (only when Functions tab is active)
+
 ## [0.1.34] - 2025-01-09
 
 ### Added

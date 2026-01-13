@@ -115,7 +115,7 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 		g.updateProjectsView(v)
 	}
 
-	// Collections panel (middle-left)
+	// Collections/Functions panel (middle-left)
 	if v, err := gui.SetView(g.views.collections, 0, projectsEnd, leftWidth-1, collectionsEnd-1, 0); err != nil {
 		if !errors.Is(err, gocui.ErrUnknownView) {
 			return err
@@ -135,6 +135,8 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 		isFocused := g.currentColumn == "collections"
 
 		// Title/border color: filter color when focused AND filter is committed (not while typing)
+		// Active tab always uses ActiveBorderColor (reddish) regardless of focus
+		v.SelFgColor = g.theme.ActiveBorderColor
 		if isFocused && hasCommittedFilter {
 			gui.SelFrameColor = g.theme.FilterBorderColor
 			gui.SelFgColor = g.theme.FilterBorderColor
@@ -149,16 +151,31 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 			v.TitleColor = g.theme.InactiveBorderColor
 			v.FrameColor = g.theme.InactiveBorderColor
 		}
-		v.Title = " " + icons.COLLECTION_ICON + " Collections "
-		// Set footer with count
-		filtered := g.getFilteredCollections()
-		hasFilter := hasCommittedFilter || isTypingFilter
-		if hasFilter {
-			v.Footer = fmt.Sprintf("%d/%d matched", len(filtered), len(g.collections))
-		} else if len(g.collections) > 0 {
-			v.Footer = fmt.Sprintf("%d of %d", g.selectedCollectionIdx+1, len(g.collections))
+
+		// Use gocui's built-in Tabs feature for proper rendering
+		v.Tabs = []string{icons.COLLECTION_ICON + " Collections", "⚡ Functions"}
+		if g.collectionsTab == "functions" {
+			v.TabIndex = 1
+			filtered := g.getFilteredFunctions()
+			hasFilter := hasCommittedFilter || isTypingFilter
+			if hasFilter {
+				v.Footer = fmt.Sprintf("%d/%d matched", len(filtered), len(g.functions))
+			} else if len(g.functions) > 0 {
+				v.Footer = fmt.Sprintf("%d of %d", g.selectedFunctionIdx+1, len(g.functions))
+			} else {
+				v.Footer = "0 of 0"
+			}
 		} else {
-			v.Footer = "0 of 0"
+			v.TabIndex = 0
+			filtered := g.getFilteredCollections()
+			hasFilter := hasCommittedFilter || isTypingFilter
+			if hasFilter {
+				v.Footer = fmt.Sprintf("%d/%d matched", len(filtered), len(g.collections))
+			} else if len(g.collections) > 0 {
+				v.Footer = fmt.Sprintf("%d of %d", g.selectedCollectionIdx+1, len(g.collections))
+			} else {
+				v.Footer = "0 of 0"
+			}
 		}
 		g.updateCollectionsView(v)
 	}
@@ -235,24 +252,41 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 		hasCommittedFilter := g.hasActiveFilter("details")
 		isFocused := g.currentColumn == "details"
 
-		// Title/border color: filter color when focused AND filter is committed (not while typing)
+		// Title/border color
+		// Active tab always uses ActiveBorderColor regardless of focus
+		v.SelFgColor = g.theme.ActiveBorderColor
 		if isFocused && hasCommittedFilter {
 			gui.SelFrameColor = g.theme.FilterBorderColor
 			gui.SelFgColor = g.theme.FilterBorderColor
-			v.Title = " " + icons.DETAILS_ICON + " Details (filtered) "
 			v.TitleColor = g.theme.FilterBorderColor
 			v.FrameColor = g.theme.FilterBorderColor
 		} else if isFocused {
 			gui.SelFrameColor = g.theme.ActiveBorderColor
 			gui.SelFgColor = g.theme.ActiveBorderColor
-			v.Title = " " + icons.DETAILS_ICON + " Details (j/k scroll) "
 			v.TitleColor = g.theme.ActiveBorderColor
 			v.FrameColor = g.theme.ActiveBorderColor
 		} else {
-			v.Title = " " + icons.DETAILS_ICON + " Details "
 			v.TitleColor = g.theme.InactiveBorderColor
 			v.FrameColor = g.theme.InactiveBorderColor
 		}
+
+		// Show tabs when Functions tab is active AND came from Collections panel
+		if g.collectionsTab == "functions" && (g.currentColumn == "collections" || (g.currentColumn == "details" && g.previousColumn == "collections")) {
+			v.Tabs = []string{icons.DETAILS_ICON + " Details", "📋 Logs"}
+			if g.detailsTab == "logs" {
+				v.TabIndex = 1
+			} else {
+				v.TabIndex = 0
+			}
+		} else {
+			// No tabs when not in Functions context
+			v.Tabs = nil
+			// Only reset detailsTab when on Tree or Projects (not when switching to Collections tab)
+			if g.currentColumn == "tree" || g.currentColumn == "projects" {
+				g.detailsTab = "details"
+			}
+		}
+
 		g.updateDetailsView(v)
 		v.SetOrigin(0, g.detailsScrollPos)
 	}
@@ -550,6 +584,15 @@ func (g *Gui) updateProjectsView(v *gocui.View) {
 func (g *Gui) updateCollectionsView(v *gocui.View) {
 	v.Clear()
 
+	// Show content based on active tab (title is set in Layout)
+	if g.collectionsTab == "functions" {
+		g.renderFunctionsContent(v)
+	} else {
+		g.renderCollectionsContent(v)
+	}
+}
+
+func (g *Gui) renderCollectionsContent(v *gocui.View) {
 	// Show loading indicator when collections are being loaded
 	if g.collectionsLoading {
 		v.Highlight = false
@@ -585,6 +628,183 @@ func (g *Gui) updateCollectionsView(v *gocui.View) {
 			g.selectedCollectionIdx = len(filtered) - 1
 		}
 		v.FocusPoint(0, g.selectedCollectionIdx, true)
+	}
+}
+
+func (g *Gui) renderFunctionsContent(v *gocui.View) {
+	// Show loading indicator when functions are being loaded
+	if g.functionsLoading {
+		v.Highlight = false
+		fmt.Fprint(v, g.getLoadingText("Loading functions..."))
+		return
+	}
+
+	filtered := g.getFilteredFunctions()
+
+	// Enable highlight when this view is focused
+	v.Highlight = g.currentColumn == "collections" && len(filtered) > 0
+
+	if len(filtered) == 0 {
+		fmt.Fprint(v, "\033[90mNo functions deployed\033[0m")
+		return
+	}
+
+	activeColor := g.getActiveColorCode()
+	resetColor := "\033[0m"
+	greenColor := "\033[32m"
+	yellowColor := "\033[33m"
+	redColor := "\033[31m"
+
+	for _, fn := range filtered {
+		// Status color
+		statusColor := greenColor
+		switch fn.Status {
+		case "DEPLOYING", "DELETE_IN_PROGRESS":
+			statusColor = yellowColor
+		case "OFFLINE", "UNKNOWN":
+			statusColor = redColor
+		}
+
+		// Function icon (lightning bolt)
+		icon := "⚡"
+
+		// Mark current function
+		marker := "  "
+		if g.currentFunction != nil && fn.DisplayName == g.currentFunction.DisplayName {
+			marker = activeColor + "* " + resetColor
+		}
+
+		// Format: ⚡ functionName (region) [STATUS]
+		fmt.Fprintf(v, "%s%s %s %s(%s)%s %s[%s]%s\n",
+			marker, icon, fn.DisplayName,
+			"\033[90m", fn.Region, resetColor,
+			statusColor, fn.Status, resetColor)
+	}
+
+	// Handle scrolling and set cursor for highlight
+	if len(filtered) > 0 {
+		// Clamp selection to filtered list
+		if g.selectedFunctionIdx >= len(filtered) {
+			g.selectedFunctionIdx = len(filtered) - 1
+		}
+		v.FocusPoint(0, g.selectedFunctionIdx, true)
+	}
+}
+
+func (g *Gui) renderFunctionDetails(v *gocui.View) {
+	fn := g.currentFunction
+	if fn == nil {
+		return
+	}
+
+	resetColor := "\033[0m"
+	cyanColor := "\033[36m"
+	dimColor := "\033[90m"
+	greenColor := "\033[32m"
+	yellowColor := "\033[33m"
+
+	fmt.Fprintf(v, "%s─── Function Details ───%s\n\n", cyanColor, resetColor)
+
+	// Name
+	fmt.Fprintf(v, " %sName:%s        %s\n", dimColor, resetColor, fn.DisplayName)
+
+	// Status with color
+	statusColor := greenColor
+	if fn.Status == "DEPLOYING" || fn.Status == "DELETE_IN_PROGRESS" {
+		statusColor = yellowColor
+	} else if fn.Status == "OFFLINE" || fn.Status == "UNKNOWN" {
+		statusColor = "\033[31m" // Red
+	}
+	fmt.Fprintf(v, " %sStatus:%s      %s%s%s\n", dimColor, resetColor, statusColor, fn.Status, resetColor)
+
+	// Runtime
+	fmt.Fprintf(v, " %sRuntime:%s     %s\n", dimColor, resetColor, fn.Runtime)
+
+	// Region
+	fmt.Fprintf(v, " %sRegion:%s      %s\n", dimColor, resetColor, fn.Region)
+
+	// Memory
+	if fn.Memory != "" {
+		fmt.Fprintf(v, " %sMemory:%s      %s\n", dimColor, resetColor, fn.Memory)
+	}
+
+	// Timeout
+	if fn.Timeout != "" {
+		fmt.Fprintf(v, " %sTimeout:%s     %s\n", dimColor, resetColor, fn.Timeout)
+	}
+
+	// Trigger
+	fmt.Fprintf(v, " %sTrigger:%s     %s\n", dimColor, resetColor, fn.TriggerType)
+
+	// URL for HTTP triggers
+	if fn.TriggerURL != "" {
+		fmt.Fprintf(v, " %sURL:%s         %s\n", dimColor, resetColor, fn.TriggerURL)
+	}
+
+	// Entry point
+	if fn.EntryPoint != "" {
+		fmt.Fprintf(v, " %sEntry:%s       %s\n", dimColor, resetColor, fn.EntryPoint)
+	}
+
+	// Last updated
+	if fn.UpdatedAt != "" {
+		fmt.Fprintf(v, " %sUpdated:%s     %s\n", dimColor, resetColor, fn.UpdatedAt)
+	}
+}
+
+func (g *Gui) renderFunctionLogs(v *gocui.View) {
+	v.Clear()
+
+	resetColor := "\033[0m"
+	cyanColor := "\033[36m"
+	dimColor := "\033[90m"
+	greenColor := "\033[32m"
+	yellowColor := "\033[33m"
+	redColor := "\033[31m"
+
+	if g.currentFunction == nil {
+		fmt.Fprintf(v, "%s─── Logs ───%s\n\n", cyanColor, resetColor)
+		fmt.Fprintf(v, "%sNo function selected%s\n\n", dimColor, resetColor)
+		fmt.Fprintf(v, "%sSelect a function from the Functions tab%s\n", dimColor, resetColor)
+		fmt.Fprintf(v, "%s(press '[' or ']' to switch tabs)%s\n", dimColor, resetColor)
+		return
+	}
+
+	// Header
+	fmt.Fprintf(v, "%s─── Logs: %s ───%s\n", cyanColor, g.currentFunction.DisplayName, resetColor)
+	fmt.Fprintf(v, "%s(press 'r' to refresh)%s\n\n", dimColor, resetColor)
+
+	// Show loading indicator
+	if g.logsLoading && len(g.functionLogs) == 0 {
+		fmt.Fprint(v, g.getLoadingText("Loading logs..."))
+		return
+	}
+
+	if len(g.functionLogs) == 0 {
+		fmt.Fprintf(v, "%sNo logs available%s\n", dimColor, resetColor)
+		return
+	}
+
+	// Render logs (newest first based on API response)
+	for _, log := range g.functionLogs {
+		// Severity color
+		severityColor := dimColor
+		switch log.Severity {
+		case "INFO":
+			severityColor = greenColor
+		case "WARNING":
+			severityColor = yellowColor
+		case "ERROR":
+			severityColor = redColor
+		case "DEBUG":
+			severityColor = dimColor
+		}
+
+		// Format: timestamp SEVERITY message
+		fmt.Fprintf(v, "%s%s%s %s%-7s%s %s\n",
+			dimColor, log.Timestamp, resetColor,
+			severityColor, log.Severity, resetColor,
+			log.Message)
 	}
 }
 
@@ -678,6 +898,28 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 }
 
 func (g *Gui) updateDetailsView(v *gocui.View) {
+	// Determine context based on current panel (or previous if in details)
+	showFunctions := g.collectionsTab == "functions" &&
+		(g.currentColumn == "collections" || (g.currentColumn == "details" && g.previousColumn == "collections"))
+
+	// Functions context: show function details or logs
+	if showFunctions {
+		if g.detailsTab == "logs" {
+			g.renderFunctionLogs(v)
+			return
+		}
+		if g.currentFunction != nil {
+			v.Clear()
+			g.renderFunctionDetails(v)
+			return
+		}
+		// No function selected yet
+		v.Clear()
+		fmt.Fprint(v, "\033[90mSelect a function to view details\033[0m")
+		return
+	}
+
+	// Document/Collections context: show document data
 	// Show loading indicator when details are being loaded
 	if g.detailsLoading {
 		v.Clear()
@@ -685,7 +927,7 @@ func (g *Gui) updateDetailsView(v *gocui.View) {
 		return
 	}
 
-	// Show document data if available (highest priority)
+	// Show document data if available
 	if g.currentDocData != nil {
 		// When filtering details, always re-render to apply filter
 		detailsFilter := g.getDetailsFilter()
@@ -955,12 +1197,12 @@ func (g *Gui) updateHelpView(v *gocui.View) {
 		return
 	}
 
-	helpText := " \033[36m←/→\033[0m cols  \033[36mj/k\033[0m move  \033[33mspace\033[0m select  \033[32mc\033[0m copy  \033[32ms\033[0m save  \033[35m/\033[0m filter  \033[33mQ\033[0m query  \033[35m?\033[0m help  \033[31mq\033[0m quit"
+	helpText := " \033[36m←/→\033[0m cols  \033[36mj/k\033[0m move  \033[36m[/]\033[0m tabs  \033[33mspace\033[0m select  \033[32mc\033[0m copy  \033[35m/\033[0m filter  \033[33mF\033[0m query  \033[35m?\033[0m help  \033[31mq\033[0m quit"
 	versionText := fmt.Sprintf("\033[90mv%s\033[0m ", g.version)
 
 	// Calculate padding to right-align version
 	width, _ := v.Size()
-	helpLen := 85 // Approximate visible length without ANSI codes
+	helpLen := 90 // Approximate visible length without ANSI codes
 	versionLen := len(g.version) + 2
 	padding := width - helpLen - versionLen
 	if padding < 1 {

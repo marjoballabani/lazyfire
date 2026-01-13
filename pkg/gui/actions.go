@@ -139,7 +139,9 @@ func (g *Gui) filterInsertQ() error      { return g.insertFilterChar(g.g, 'q') }
 func (g *Gui) filterInsertUpperF() error { return g.insertFilterChar(g.g, 'F') }
 func (g *Gui) filterInsertV() error         { return g.insertFilterChar(g.g, 'v') }
 func (g *Gui) filterInsertE() error         { return g.insertFilterChar(g.g, 'e') }
-func (g *Gui) filterInsertSlash() error     { return g.insertFilterChar(g.g, '/') }
+func (g *Gui) filterInsertSlash() error        { return g.insertFilterChar(g.g, '/') }
+func (g *Gui) filterInsertBracketLeft() error  { return g.insertFilterChar(g.g, '[') }
+func (g *Gui) filterInsertBracketRight() error { return g.insertFilterChar(g.g, ']') }
 
 // doColumnLeft switches to the panel on the left (skips details)
 func (g *Gui) doColumnLeft() error {
@@ -184,8 +186,15 @@ func (g *Gui) doCursorUp() error {
 			g.currentProjectInfo = nil
 		}
 	case "collections":
-		if g.selectedCollectionIdx > 0 {
-			g.selectedCollectionIdx--
+		if g.collectionsTab == "functions" {
+			filtered := g.getFilteredFunctions()
+			if g.selectedFunctionIdx > 0 && g.selectedFunctionIdx < len(filtered) {
+				g.selectedFunctionIdx--
+			}
+		} else {
+			if g.selectedCollectionIdx > 0 {
+				g.selectedCollectionIdx--
+			}
 		}
 	case "tree":
 		if g.selectedTreeIdx > 0 {
@@ -209,9 +218,16 @@ func (g *Gui) doCursorDown() error {
 			g.currentProjectInfo = nil
 		}
 	case "collections":
-		filtered := g.getFilteredCollections()
-		if g.selectedCollectionIdx < len(filtered)-1 {
-			g.selectedCollectionIdx++
+		if g.collectionsTab == "functions" {
+			filtered := g.getFilteredFunctions()
+			if g.selectedFunctionIdx < len(filtered)-1 {
+				g.selectedFunctionIdx++
+			}
+		} else {
+			filtered := g.getFilteredCollections()
+			if g.selectedCollectionIdx < len(filtered)-1 {
+				g.selectedCollectionIdx++
+			}
 		}
 	case "tree":
 		filtered := g.getFilteredTreeNodes()
@@ -224,13 +240,67 @@ func (g *Gui) doCursorDown() error {
 	return g.Layout(g.g)
 }
 
-// doNextColumn - Tab goes to details panel (keeps existing content)
+// doNextColumn - Tab goes to details panel from any panel
 func (g *Gui) doNextColumn() error {
 	if g.currentColumn == "details" {
 		return nil // Already in details, do nothing
 	}
 	g.previousColumn = g.currentColumn
 	return g.setFocus(g.g, "details")
+}
+
+// doSwitchTab switches tabs based on current panel ([ and ] keys)
+// Collections panel: switch Collections/Functions tabs
+// Details panel: switch Details/Logs tabs (only when Functions tab is active)
+func (g *Gui) doSwitchTab() error {
+	switch g.currentColumn {
+	case "collections":
+		// Switch Collections/Functions tabs (preserve state for both)
+		if g.collectionsTab == "collections" {
+			g.collectionsTab = "functions"
+			if len(g.functions) == 0 && g.currentProject != "" {
+				g.loadFunctions()
+			}
+		} else {
+			g.collectionsTab = "collections"
+			g.stopLogsRefresh()
+			// Keep currentFunction and functionLogs - don't clear them
+			if len(g.collections) == 0 && g.currentProject != "" {
+				g.collectionsLoading = true
+				go func() {
+					if err := g.loadCollections(); err != nil {
+						g.g.Update(func(gui *gocui.Gui) error {
+							g.collectionsLoading = false
+							g.logCommand("api", fmt.Sprintf("ListCollections failed: %v", err), "error")
+							return nil
+						})
+						return
+					}
+					g.g.Update(func(gui *gocui.Gui) error {
+						g.collectionsLoading = false
+						g.logCommand("api", fmt.Sprintf("ListCollections → %d collections", len(g.collections)), "success")
+						return nil
+					})
+				}()
+			}
+		}
+	case "details":
+		// Switch Details/Logs tabs (only when Functions tab is active)
+		if g.collectionsTab != "functions" {
+			return nil
+		}
+		if g.detailsTab == "details" {
+			g.detailsTab = "logs"
+			if g.currentFunction != nil && len(g.functionLogs) == 0 && !g.logsLoading {
+				g.loadFunctionLogs()
+			}
+		} else {
+			g.detailsTab = "details"
+		}
+	default:
+		return nil
+	}
+	return g.Layout(g.g)
 }
 
 // doSpace handles space key - select/expand in current panel
@@ -240,6 +310,9 @@ func (g *Gui) doSpace() error {
 	case "projects":
 		return g.selectProject(g.g)
 	case "collections":
+		if g.collectionsTab == "functions" {
+			return g.selectFunction(g.g)
+		}
 		return g.selectCollection(g.g)
 	case "tree":
 		return g.selectTreeNode(g.g)
@@ -257,6 +330,15 @@ func (g *Gui) doEnter() error {
 	switch g.currentColumn {
 	case "projects":
 		return g.fetchProjectDetails(g.g)
+	case "collections":
+		if g.collectionsTab == "functions" {
+			// Select function and go to details to see logs
+			if err := g.selectFunction(g.g); err != nil {
+				return err
+			}
+			g.previousColumn = g.currentColumn
+			return g.setFocus(g.g, "details")
+		}
 	case "tree":
 		// In select mode with docs already loaded, just go to details
 		if g.selectMode && g.currentDocData != nil {
@@ -288,7 +370,11 @@ func (g *Gui) doStartFilter() error {
 	case "projects":
 		g.projectsFilter = ""
 	case "collections":
-		g.collectionsFilter = ""
+		if g.collectionsTab == "functions" {
+			g.functionsFilter = ""
+		} else {
+			g.collectionsFilter = ""
+		}
 	case "tree":
 		g.treeFilter = ""
 	case "details":
@@ -405,26 +491,89 @@ func (g *Gui) doEditInEditor() error {
 	return g.Layout(g.g)
 }
 
-// doRefresh reloads all data
+// doRefresh reloads data based on current panel and tab
 func (g *Gui) doRefresh() error {
-	g.logCommand("r", "Refreshing...", "running")
-
-	if err := g.loadProjects(); err != nil {
-		g.logCommand("r", fmt.Sprintf("Failed: %v", err), "error")
+	switch g.currentColumn {
+	case "details":
+		// In details view with Logs tab: refresh logs
+		if g.detailsTab == "logs" && g.currentFunction != nil {
+			g.logCommand("r", "Refreshing logs...", "running")
+			g.loadFunctionLogs()
+			return g.Layout(g.g)
+		}
+	case "collections":
+		// In collections panel with functions tab: refresh functions
+		if g.collectionsTab == "functions" {
+			g.logCommand("r", "Refreshing functions...", "running")
+			g.loadFunctions()
+			return g.Layout(g.g)
+		}
+		// In collections panel with collections tab: refresh collections
+		if g.currentProject != "" {
+			g.logCommand("r", "Refreshing collections...", "running")
+			g.collectionsLoading = true
+			go func() {
+				if err := g.loadCollections(); err != nil {
+					g.g.Update(func(gui *gocui.Gui) error {
+						g.collectionsLoading = false
+						g.logCommand("r", fmt.Sprintf("Failed: %v", err), "error")
+						return nil
+					})
+					return
+				}
+				g.g.Update(func(gui *gocui.Gui) error {
+					g.collectionsLoading = false
+					g.logCommand("r", fmt.Sprintf("Loaded %d collections", len(g.collections)), "success")
+					return nil
+				})
+			}()
+			return g.Layout(g.g)
+		}
+	case "projects":
+		// In projects panel: refresh projects
+		g.logCommand("r", "Refreshing projects...", "running")
+		if err := g.loadProjects(); err != nil {
+			g.logCommand("r", fmt.Sprintf("Failed: %v", err), "error")
+			return g.Layout(g.g)
+		}
+		g.logCommand("r", fmt.Sprintf("Loaded %d projects", len(g.projects)), "success")
 		return g.Layout(g.g)
+	case "tree":
+		// In tree panel: refresh current collection documents
+		if g.currentCollection != "" {
+			g.logCommand("r", "Refreshing documents...", "running")
+			g.treeLoading = true
+			go func() {
+				docs, err := g.firebaseClient.ListDocuments(g.currentCollection, 50)
+				g.g.Update(func(gui *gocui.Gui) error {
+					g.treeLoading = false
+					if err != nil {
+						g.logCommand("r", fmt.Sprintf("Failed: %v", err), "error")
+						return nil
+					}
+					g.treeNodes = nil
+					for _, doc := range docs {
+						g.docCache[doc.Path] = doc.Data
+						node := TreeNode{
+							Path:        doc.Path,
+							Name:        doc.ID,
+							Type:        "document",
+							Depth:       0,
+							HasChildren: true,
+							Expanded:    false,
+						}
+						g.treeNodes = append(g.treeNodes, node)
+					}
+					g.selectedTreeIdx = 0
+					g.logCommand("r", fmt.Sprintf("Loaded %d documents", len(docs)), "success")
+					return nil
+				})
+			}()
+			return g.Layout(g.g)
+		}
 	}
 
-	g.collections = nil
-	g.treeNodes = nil
-	g.currentDocData = nil
-	g.currentDocPath = ""
-	g.currentProjectInfo = nil
-	g.selectedProjectIndex = 0
-	g.selectedCollectionIdx = 0
-	g.selectedTreeIdx = 0
-
-	g.logCommand("r", fmt.Sprintf("Loaded %d projects", len(g.projects)), "success")
-	return g.Layout(g.g)
+	return nil
 }
 
 // Mouse click handlers
