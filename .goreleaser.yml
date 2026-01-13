@@ -57,7 +57,9 @@ changelog:
       - 'Merge branch'
 
 brews:
-  - repository:
+  - ids:
+      - versioned
+    repository:
       owner: marjoballabani
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
