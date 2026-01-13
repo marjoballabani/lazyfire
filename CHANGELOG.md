@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.36] - 2025-01-13
+
+### Added
+- **Cloud Functions v2 support** - Now fetches both 1st and 2nd generation Cloud Functions
+  - Functions list shows both v1 and v2 functions with version indicator
+  - Logs support both v1 (Cloud Functions) and v2 (Cloud Run) resource types
+  - Combined logs sorted by timestamp
+
 ## [0.1.35] - 2025-01-13
 
 ### Added
