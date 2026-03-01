@@ -13,10 +13,10 @@ LazyFire is a terminal-based Firebase browser that lets you navigate your Firest
 
    ```bash
    # Homebrew (recommended)
-   brew install marjoballabani/tap/lazyfire
+   brew install felixdujadin/tap/lazyfire
 
    # Or via Go
-   go install github.com/marjoballabani/lazyfire@latest
+   go install github.com/felixdujadin/lazyfire@latest
    ```
 
 2. **Run it**
