@@ -11,7 +11,15 @@ import (
 
 // Config is the root configuration structure for LazyFire.
 type Config struct {
-	UI UIConfig `mapstructure:"ui"`
+	UI       UIConfig       `mapstructure:"ui"`
+	Emulator EmulatorConfig `mapstructure:"emulator"`
+}
+
+// EmulatorConfig contains settings for connecting to local Firebase emulators.
+type EmulatorConfig struct {
+	Enabled       bool   `mapstructure:"enabled"`
+	ProjectID     string `mapstructure:"projectId"`     // Required when emulator is enabled
+	FirestoreHost string `mapstructure:"firestoreHost"` // Default: localhost:8080
 }
 
 // UIConfig contains user interface configuration options.

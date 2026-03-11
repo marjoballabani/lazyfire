@@ -21,6 +21,8 @@ type Client struct {
 	config         *config.Config
 	currentProject string
 	usingLocalAuth bool
+	emulatorMode   bool
+	firestoreHost  string // e.g. "localhost:8080" for emulator
 }
 
 // Project represents a Firebase project.
@@ -45,7 +47,27 @@ type ProjectDetails struct {
 
 // NewClient creates a new Firebase client using existing CLI authentication.
 // Authentication is verified lazily when ListProjects is called.
+// If emulator mode is enabled in config, it skips CLI checks and connects locally.
 func NewClient(ctx context.Context, cfg *config.Config) (*Client, error) {
+	if cfg.Emulator.Enabled {
+		if cfg.Emulator.ProjectID == "" {
+			return nil, fmt.Errorf("emulator.projectId is required when emulator is enabled")
+		}
+
+		host := cfg.Emulator.FirestoreHost
+		if host == "" {
+			host = "localhost:8080"
+		}
+
+		return &Client{
+			ctx:            ctx,
+			config:         cfg,
+			emulatorMode:   true,
+			firestoreHost:  host,
+			currentProject: cfg.Emulator.ProjectID,
+		}, nil
+	}
+
 	// Just verify firebase CLI is installed (fast check)
 	if _, err := exec.LookPath("firebase"); err != nil {
 		return nil, fmt.Errorf("firebase CLI not found. Please install it: npm install -g firebase-tools")
@@ -60,7 +82,16 @@ func NewClient(ctx context.Context, cfg *config.Config) (*Client, error) {
 
 // ListProjects returns all Firebase projects accessible to the authenticated user.
 // It calls 'firebase projects:list' and parses the JSON output.
+// In emulator mode, it returns the configured project directly.
 func (c *Client) ListProjects() ([]Project, error) {
+	if c.emulatorMode {
+		return []Project{{
+			ID:          c.config.Emulator.ProjectID,
+			DisplayName: c.config.Emulator.ProjectID + " (emulator)",
+			Environment: c.config.Emulator.ProjectID,
+		}}, nil
+	}
+
 	cmd := exec.Command("firebase", "projects:list", "--json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -113,8 +144,21 @@ func (c *Client) IsUsingLocalAuth() bool {
 	return c.usingLocalAuth
 }
 
+// IsEmulatorMode returns true if connected to a local emulator.
+func (c *Client) IsEmulatorMode() bool {
+	return c.emulatorMode
+}
+
 // GetProjectDetails fetches extended information about a Firebase project.
+// In emulator mode, returns minimal details since the Firebase API is not available.
 func (c *Client) GetProjectDetails(projectID string) (*ProjectDetails, error) {
+	if c.emulatorMode {
+		return &ProjectDetails{
+			ProjectID:   projectID,
+			DisplayName: projectID + " (emulator)",
+		}, nil
+	}
+
 	token, err := c.getFirebaseToken()
 	if err != nil {
 		return nil, err

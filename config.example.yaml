@@ -48,3 +48,10 @@ ui:
 # Disable icons (for terminals without Nerd Fonts)
 # ui:
 #   nerdFontsVersion: ""
+
+# Connect to local Firebase emulators
+# Start emulators first: firebase emulators:start
+# emulator:
+#   enabled: true
+#   projectId: "my-project-id"       # Required: your Firebase project ID
+#   firestoreHost: "localhost:8080"   # Optional: default is localhost:8080

@@ -33,9 +33,14 @@ type LogEntry struct {
 }
 
 // ListFunctions fetches all Cloud Functions (v1 and v2) for the current project.
+// In emulator mode, returns empty since the Functions emulator doesn't expose a list API.
 func (c *Client) ListFunctions() ([]CloudFunction, error) {
 	if c.currentProject == "" {
 		return nil, fmt.Errorf("no project selected")
+	}
+
+	if c.emulatorMode {
+		return nil, nil
 	}
 
 	token, err := c.getFirebaseToken()
@@ -271,9 +276,14 @@ func parseTriggerType(eventType string) string {
 
 // GetFunctionLogs fetches recent logs for a function using Cloud Logging API.
 // Supports both v1 (Cloud Functions) and v2 (Cloud Run) functions.
+// In emulator mode, returns empty since Cloud Logging is not available locally.
 func (c *Client) GetFunctionLogs(functionName string, limit int) ([]LogEntry, error) {
 	if c.currentProject == "" {
 		return nil, fmt.Errorf("no project selected")
+	}
+
+	if c.emulatorMode {
+		return nil, nil
 	}
 
 	token, err := c.getFirebaseToken()
