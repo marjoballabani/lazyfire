@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.39] - 2026-03-11
+
+### Added
+- **Collection Health Scan** - Press `S` on the Projects panel to scan all collections
+  - Checks first document of each collection against Firestore limits (size, index entries, depth, field name, field value, doc path)
+  - If a document exceeds 70% of any limit, checks a second document to confirm pattern
+  - Results displayed in Details panel with all metrics per collection
+  - Warning-level metrics highlighted in yellow
+  - Confirmation dialog before scanning (expensive operation warning)
+  - Export scan report as Markdown: `c` to copy, `s` to save as `.md`
+  - Collapsible healthy collections with `<details>` blocks in export
+- **Accurate index entry detection** - Calls Firestore Admin API to check for composite indexes
+  - No composite indexes: shows exact count (no `~` prefix)
+  - Has composite indexes: shows `~N+` (approximate with plus)
+  - Not yet checked: shows `~N` (previous behavior)
+- **Emulator mode** - Connect to local Firebase emulators via config
+- **Accurate document stats** - Stats calculated from raw Firestore API response
+
+### Fixed
+- Modal dialogs (query builder, confirm) now block mouse clicks on views behind them
+- Query builder now uses focused collection when none is explicitly selected
+- Clicking on Details panel now correctly saves previous panel for Esc navigation
+- `s` and `c` shortcuts no longer show errors on panels without documents
+
 ## [0.1.36] - 2025-01-13
 
 ### Added
