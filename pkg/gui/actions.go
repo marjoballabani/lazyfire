@@ -1149,6 +1149,16 @@ func (g *Gui) executeScan() {
 		}
 
 		g.g.Update(func(gui *gocui.Gui) error {
+			// Update collections panel to reflect scanned project
+			g.collections = collections
+			g.selectedCollectionIdx = 0
+			g.currentCollection = ""
+			// Clear tree
+			g.treeNodes = nil
+			g.selectedTreeIdx = 0
+			g.expandedPaths = make(map[string]bool)
+			g.queryResultMode = false
+
 			g.scanProgress = fmt.Sprintf("0/%d collections", len(collNames))
 			return nil
 		})

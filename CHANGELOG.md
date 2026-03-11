@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.40] - 2026-03-11
+
+### Changed
+- Shift+S scan now updates collections panel to reflect scanned project and clears tree
+
 ## [0.1.39] - 2026-03-11
 
 ### Added
