@@ -63,12 +63,15 @@ type Gui struct {
 	treeNodes       []TreeNode
 	selectedTreeIdx int
 	expandedPaths   map[string]bool
-	docCache        map[string]map[string]any // Cache of fetched documents by path
-	collectionCache map[string][]string       // Cache of document paths per collection
+	docCache        map[string]map[string]any    // Cache of fetched documents by path
+	statsCache      map[string]*firebase.DocStats // Cache of document stats by path
+	collectionCache     map[string][]string       // Cache of document paths per collection
+	compositeIndexCache map[string]*bool          // nil=not checked, false=no composites, true=has composites
 
 	// Details state
 	currentDocPath     string
 	currentDocData     map[string]any
+	currentDocStats    *firebase.DocStats
 	currentProjectInfo *firebase.ProjectDetails
 	detailsScrollPos   int
 	detailsTab         string // "details" or "logs"
@@ -208,7 +211,9 @@ func NewGui(config *config.Config, firebaseClient *firebase.Client, version stri
 		expandedPaths:   make(map[string]bool),
 		selectedDocs:    make(map[int]bool),
 		docCache:        make(map[string]map[string]any),
-		collectionCache: make(map[string][]string),
+		statsCache:      make(map[string]*firebase.DocStats),
+		collectionCache:     make(map[string][]string),
+		compositeIndexCache: make(map[string]*bool),
 	}
 
 	// Set view names

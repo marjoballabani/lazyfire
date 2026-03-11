@@ -785,6 +785,7 @@ func (g *Gui) doFetchSelectedDocs() error {
 	if len(toFetch) == 0 {
 		if len(combined) > 0 {
 			g.currentDocData = combined
+			g.currentDocStats = nil // No stats for combined multi-doc view
 			g.currentDocPath = fmt.Sprintf("%d documents selected", len(combined))
 			g.clearDetailsCache()
 			g.logCommand("cache", fmt.Sprintf("Using %d cached documents", len(combined)), "success")
@@ -831,6 +832,7 @@ func (g *Gui) doFetchSelectedDocs() error {
 
 	if len(combined) > 0 {
 		g.currentDocData = combined
+		g.currentDocStats = nil // No stats for combined multi-doc view
 		g.currentDocPath = fmt.Sprintf("%d documents selected", len(combined))
 		g.clearDetailsCache()
 		g.logCommand("api", fmt.Sprintf("Loaded %d documents", len(combined)), "success")

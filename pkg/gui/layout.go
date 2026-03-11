@@ -961,8 +961,34 @@ func (g *Gui) updateDetailsView(v *gocui.View) {
 
 		// Show stats for actual documents
 		if strings.Contains(g.currentDocPath, "/") {
-			stats := calculateDocStats(g.currentDocData, g.currentDocPath)
-			content.WriteString(formatDocStats(stats))
+			var stats docStats
+			if g.currentDocStats != nil {
+				stats = docStats{
+					sizeBytes:     g.currentDocStats.SizeBytes,
+					fieldCount:    g.currentDocStats.FieldCount,
+					leafFields:    g.currentDocStats.LeafFields,
+					maxDepth:      g.currentDocStats.MaxDepth,
+					maxFieldName:  g.currentDocStats.MaxFieldName,
+					maxFieldValue: g.currentDocStats.MaxFieldValue,
+					docPathLen:    g.currentDocStats.DocNameSize,
+				}
+			} else {
+				stats = calculateDocStats(g.currentDocData, g.currentDocPath)
+			}
+			// Determine index certainty from composite index cache
+			idxCert := indexCertaintyUnknown
+			pathParts := strings.Split(g.currentDocPath, "/")
+			if len(pathParts) >= 2 {
+				collID := pathParts[len(pathParts)-2]
+				if val, ok := g.compositeIndexCache[collID]; ok {
+					if *val {
+						idxCert = indexCertaintyApproximate
+					} else {
+						idxCert = indexCertaintyExact
+					}
+				}
+			}
+			content.WriteString(formatDocStats(stats, g.currentDocStats != nil, idxCert))
 			content.WriteString("\n")
 		}
 		content.WriteString("\n")
@@ -1215,7 +1241,7 @@ func (g *Gui) updateHelpView(v *gocui.View) {
 // Firestore limits (https://firebase.google.com/docs/firestore/quotas)
 const (
 	maxDocSizeBytes    = 1048576         // 1 MiB
-	maxFieldCount      = 20000           // Due to 40k index entries limit (2 per field)
+	maxIndexEntries    = 40000           // Firestore limit: 40k index entries per document
 	maxDepth           = 20              // Maximum depth of nested maps/arrays
 	maxFieldNameBytes  = 1500            // Maximum field name size
 	maxFieldValueBytes = 1048576 - 89    // 1 MiB - 89 bytes
@@ -1226,24 +1252,82 @@ const (
 type docStats struct {
 	sizeBytes       int
 	fieldCount      int
+	leafFields      int // leaf fields only (for index entry estimation)
 	maxDepth        int
 	maxFieldName    int // longest field name in bytes
 	maxFieldValue   int // largest field value in bytes
-	docPathLen      int // document path length
+	docPathLen      int // document name size per Firestore calculation
 }
 
 // calculateDocStats calculates all document statistics
 func calculateDocStats(data map[string]any, docPath string) docStats {
-	jsonBytes, _ := json.Marshal(data)
 	maxName, maxValue := findMaxFieldSizes(data)
 	return docStats{
-		sizeBytes:     len(jsonBytes),
+		sizeBytes:     firestoreDocSize(data, docPath),
 		fieldCount:    countFields(data),
+		leafFields:    countLeafFields(data),
 		maxDepth:      calculateDepth(data),
 		maxFieldName:  maxName,
 		maxFieldValue: maxValue,
-		docPathLen:    len(docPath),
+		docPathLen:    firestoreDocNameSize(docPath),
 	}
+}
+
+// firestoreDocNameSize calculates the document name size per Firestore rules:
+// sum of each path component's UTF-8 size + 1 byte per component + 16 bytes
+func firestoreDocNameSize(docPath string) int {
+	parts := strings.Split(docPath, "/")
+	size := 16
+	for _, part := range parts {
+		size += len(part) + 1
+	}
+	return size
+}
+
+// firestoreValueSize returns the size of a value per Firestore storage rules.
+func firestoreValueSize(val any) int {
+	switch v := val.(type) {
+	case nil:
+		return 1
+	case bool:
+		return 1
+	case float64:
+		return 8 // double
+	case string:
+		return len(v) + 1
+	case map[string]any:
+		// Check if it's a GeoPoint (has exactly latitude + longitude)
+		if len(v) == 2 {
+			if _, hasLat := v["latitude"]; hasLat {
+				if _, hasLng := v["longitude"]; hasLng {
+					return 16
+				}
+			}
+		}
+		size := 0
+		for key, val := range v {
+			size += len(key) + 1 + firestoreValueSize(val)
+		}
+		return size
+	case []any:
+		size := 0
+		for _, item := range v {
+			size += firestoreValueSize(item)
+		}
+		return size
+	default:
+		return 0
+	}
+}
+
+// firestoreDocSize calculates the document size per Firestore rules:
+// document name size + sum of (field name size + 1 + field value size) + 32 bytes
+func firestoreDocSize(data map[string]any, docPath string) int {
+	size := firestoreDocNameSize(docPath) + 32
+	for key, val := range data {
+		size += len(key) + 1 + firestoreValueSize(val)
+	}
+	return size
 }
 
 // findMaxFieldSizes finds the largest field name and value sizes
@@ -1255,10 +1339,9 @@ func findMaxFieldSizes(data any) (maxName int, maxValue int) {
 			if nameLen > maxName {
 				maxName = nameLen
 			}
-			// Calculate value size
-			valBytes, _ := json.Marshal(val)
-			if len(valBytes) > maxValue {
-				maxValue = len(valBytes)
+			valSize := firestoreValueSize(val)
+			if valSize > maxValue {
+				maxValue = valSize
 			}
 			// Recurse into nested structures
 			nestedName, nestedValue := findMaxFieldSizes(val)
@@ -1303,6 +1386,34 @@ func countFields(data any) int {
 	}
 }
 
+// countLeafFields counts only leaf fields (non-map, non-array values).
+// Firestore only creates index entries for leaf fields, not intermediate map keys.
+func countLeafFields(data any) int {
+	switch v := data.(type) {
+	case map[string]any:
+		count := 0
+		for _, val := range v {
+			switch val.(type) {
+			case map[string]any:
+				count += countLeafFields(val)
+			case []any:
+				count += countLeafFields(val)
+			default:
+				count++ // leaf field
+			}
+		}
+		return count
+	case []any:
+		count := 0
+		for _, item := range v {
+			count += countLeafFields(item)
+		}
+		return count
+	default:
+		return 0
+	}
+}
+
 // calculateDepth calculates the maximum nesting depth
 func calculateDepth(data any) int {
 	switch v := data.(type) {
@@ -1329,8 +1440,18 @@ func calculateDepth(data any) int {
 	}
 }
 
+// indexCertainty represents the certainty level of the index entries count.
+// -1 = unknown (not checked yet or error), 0 = exact (no composite indexes), 1 = approximate (has composite indexes)
+type indexCertainty int
+
+const (
+	indexCertaintyUnknown     indexCertainty = -1
+	indexCertaintyExact       indexCertainty = 0
+	indexCertaintyApproximate indexCertainty = 1
+)
+
 // formatDocStats returns a formatted string showing document stats with warnings
-func formatDocStats(stats docStats) string {
+func formatDocStats(stats docStats, accurate bool, idxCertainty indexCertainty) string {
 	// Helper to get color based on percentage of limit
 	// Tiers: green <50%, cyan 50-70%, yellow 70-85%, orange 85-100%, red >100%
 	getColor := func(value, limit int) string {
@@ -1347,10 +1468,20 @@ func formatDocStats(stats docStats) string {
 		return "\033[32m" // green - ok
 	}
 
-	// Line 1: Size, Fields, Depth
-	line1 := fmt.Sprintf("\033[90mSize:\033[0m %s%s / 1MB\033[0m  \033[90mFields:\033[0m %s%d / %d\033[0m  \033[90mDepth:\033[0m %s%d / %d\033[0m",
+	// Line 1: Size, Index Entries, Depth
+	indexEntries := stats.leafFields * 2 // default: 2 single-field indexes per leaf field (asc + desc)
+	var indexLabel string
+	switch idxCertainty {
+	case indexCertaintyExact:
+		indexLabel = fmt.Sprintf("%d", indexEntries)
+	case indexCertaintyApproximate:
+		indexLabel = fmt.Sprintf("~%d+", indexEntries)
+	default:
+		indexLabel = fmt.Sprintf("~%d", indexEntries)
+	}
+	line1 := fmt.Sprintf("\033[90mSize:\033[0m %s%s / 1MB\033[0m  \033[90mIndex Entries:\033[0m %s%s / %d\033[0m  \033[90mDepth:\033[0m %s%d / %d\033[0m",
 		getColor(stats.sizeBytes, maxDocSizeBytes), formatBytes(stats.sizeBytes),
-		getColor(stats.fieldCount, maxFieldCount), stats.fieldCount, maxFieldCount,
+		getColor(indexEntries, maxIndexEntries), indexLabel, maxIndexEntries,
 		getColor(stats.maxDepth, maxDepth), stats.maxDepth, maxDepth)
 
 	// Line 2: Field Name, Field Value, Doc Path
@@ -1359,7 +1490,12 @@ func formatDocStats(stats docStats) string {
 		getColor(stats.maxFieldValue, maxFieldValueBytes), formatBytes(stats.maxFieldValue),
 		getColor(stats.docPathLen, maxDocNameBytes), stats.docPathLen, maxDocNameBytes)
 
-	return line1 + "\n" + line2
+	source := "\033[90m[estimated]\033[0m"
+	if accurate {
+		source = "\033[90m[accurate]\033[0m"
+	}
+
+	return line1 + "\n" + line2 + "  " + source
 }
 
 // formatBytes formats bytes into human readable string

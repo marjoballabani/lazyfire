@@ -207,10 +207,14 @@ func TestCalculateDocStats(t *testing.T) {
 	if stats.maxDepth != 2 {
 		t.Errorf("maxDepth = %d, expected 2", stats.maxDepth)
 	}
-	if stats.docPathLen != len(docPath) {
-		t.Errorf("docPathLen = %d, expected %d", stats.docPathLen, len(docPath))
+	// Firestore doc name size: 16 + (10+1) + (6+1) = 34 for "collection/doc123"
+	if stats.docPathLen != 34 {
+		t.Errorf("docPathLen = %d, expected 34", stats.docPathLen)
 	}
 	if stats.sizeBytes <= 0 {
 		t.Error("sizeBytes should be > 0")
+	}
+	if stats.leafFields != 2 { // "name" and "value" are leaves, "nested" is a map
+		t.Errorf("leafFields = %d, expected 2", stats.leafFields)
 	}
 }

@@ -92,6 +92,7 @@ func (g *Gui) getDocumentToCopy() (map[string]any, string, error) {
 				return nil, "", fmt.Errorf("Failed to fetch document: %v", err)
 			}
 			g.currentDocData = doc.Data
+			g.currentDocStats = doc.Stats
 			g.currentDocPath = node.Path
 			return doc.Data, node.Path, nil
 		}

@@ -17,11 +17,23 @@ type Collection struct {
 	Path string // Full path from root
 }
 
+// DocStats holds Firestore document size statistics calculated from raw typed fields.
+type DocStats struct {
+	SizeBytes     int // Document size per Firestore calculation
+	FieldCount    int // Total fields including nested
+	LeafFields    int // Leaf fields only (for index entry estimation)
+	MaxDepth      int // Maximum nesting depth
+	MaxFieldName  int // Longest field name in bytes
+	MaxFieldValue int // Largest field value in bytes
+	DocNameSize   int // Document name size per Firestore calculation
+}
+
 // Document represents a Firestore document.
 type Document struct {
-	ID   string                 // Document ID
-	Path string                 // Full path from root
-	Data map[string]interface{} // Document fields as a map
+	ID    string                 // Document ID
+	Path  string                 // Full path from root
+	Data  map[string]interface{} // Document fields as a map
+	Stats *DocStats              // Accurate stats from raw Firestore response
 }
 
 // QueryFilter represents a where clause in a Firestore query.
@@ -112,21 +124,40 @@ func (c *Client) refreshAccessToken(refreshToken string) (string, error) {
 	return result.AccessToken, nil
 }
 
-// firestoreRequest makes an authenticated request to the Firestore REST API.
-func (c *Client) firestoreRequest(method, path string) ([]byte, error) {
+// firestoreBaseURL returns the base Firestore REST API URL for the current project.
+// In emulator mode, this points to the local emulator; otherwise to the production API.
+func (c *Client) firestoreBaseURL() string {
+	if c.emulatorMode {
+		return fmt.Sprintf("http://%s/v1/projects/%s/databases/(default)/documents", c.firestoreHost, c.currentProject)
+	}
+	return fmt.Sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents", c.currentProject)
+}
+
+// setAuthHeader adds the Authorization header if not in emulator mode.
+func (c *Client) setAuthHeader(req *http.Request) error {
+	if c.emulatorMode {
+		return nil
+	}
 	token, err := c.getFirebaseToken()
 	if err != nil {
-		return nil, err
+		return err
 	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	return nil
+}
 
-	url := fmt.Sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents%s", c.currentProject, path)
+// firestoreRequest makes an authenticated request to the Firestore REST API.
+func (c *Client) firestoreRequest(method, path string) ([]byte, error) {
+	url := c.firestoreBaseURL() + path
 
 	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+token)
+	if err := c.setAuthHeader(req); err != nil {
+		return nil, err
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -152,12 +183,7 @@ func (c *Client) ListCollections() ([]Collection, error) {
 		return nil, fmt.Errorf("no project selected")
 	}
 
-	token, err := c.getFirebaseToken()
-	if err != nil {
-		return nil, err
-	}
-
-	url := fmt.Sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents:listCollectionIds", c.currentProject)
+	url := c.firestoreBaseURL() + ":listCollectionIds"
 
 	var collections []Collection
 	pageToken := ""
@@ -174,7 +200,9 @@ func (c *Client) ListCollections() ([]Collection, error) {
 			return nil, err
 		}
 
-		req.Header.Set("Authorization", "Bearer "+token)
+		if err := c.setAuthHeader(req); err != nil {
+			return nil, err
+		}
 		req.Header.Set("Content-Type", "application/json")
 
 		resp, err := http.DefaultClient.Do(req)
@@ -247,10 +275,12 @@ func (c *Client) ListDocuments(collectionPath string, limit int) ([]Document, er
 		parts := strings.Split(doc.Name, "/")
 		docID := parts[len(parts)-1]
 
+		docPath := strings.Join(parts[5:], "/")
 		documents = append(documents, Document{
-			ID:   docID,
-			Path: strings.Join(parts[5:], "/"), // Path after "documents/"
-			Data: parseFirestoreFields(doc.Fields),
+			ID:    docID,
+			Path:  docPath,
+			Data:  parseFirestoreFields(doc.Fields),
+			Stats: calculateDocStats(doc.Fields, docPath),
 		})
 	}
 
@@ -280,9 +310,10 @@ func (c *Client) GetDocument(docPath string) (*Document, error) {
 	docID := parts[len(parts)-1]
 
 	return &Document{
-		ID:   docID,
-		Path: docPath,
-		Data: parseFirestoreFields(result.Fields),
+		ID:    docID,
+		Path:  docPath,
+		Data:  parseFirestoreFields(result.Fields),
+		Stats: calculateDocStats(result.Fields, docPath),
 	}, nil
 }
 
@@ -292,19 +323,16 @@ func (c *Client) ListSubcollections(docPath string) ([]Collection, error) {
 		return nil, fmt.Errorf("no project selected")
 	}
 
-	token, err := c.getFirebaseToken()
-	if err != nil {
-		return nil, err
-	}
-
-	url := fmt.Sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/%s:listCollectionIds", c.currentProject, docPath)
+	url := c.firestoreBaseURL() + "/" + docPath + ":listCollectionIds"
 
 	req, err := http.NewRequest("POST", url, strings.NewReader("{}"))
 	if err != nil {
 		return nil, err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+token)
+	if err := c.setAuthHeader(req); err != nil {
+		return nil, err
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -409,11 +437,6 @@ func (c *Client) RunQuery(collectionPath string, opts QueryOptions) ([]Document,
 		return nil, fmt.Errorf("no project selected")
 	}
 
-	token, err := c.getFirebaseToken()
-	if err != nil {
-		return nil, err
-	}
-
 	// Build the structured query
 	query := buildStructuredQuery(collectionPath, opts)
 
@@ -424,14 +447,16 @@ func (c *Client) RunQuery(collectionPath string, opts QueryOptions) ([]Document,
 		return nil, err
 	}
 
-	url := fmt.Sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents:runQuery", c.currentProject)
+	url := c.firestoreBaseURL() + ":runQuery"
 
 	req, err := http.NewRequest("POST", url, strings.NewReader(string(reqData)))
 	if err != nil {
 		return nil, err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+token)
+	if err := c.setAuthHeader(req); err != nil {
+		return nil, err
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -470,10 +495,12 @@ func (c *Client) RunQuery(collectionPath string, opts QueryOptions) ([]Document,
 		parts := strings.Split(result.Document.Name, "/")
 		docID := parts[len(parts)-1]
 
+		docPath := strings.Join(parts[5:], "/")
 		documents = append(documents, Document{
-			ID:   docID,
-			Path: strings.Join(parts[5:], "/"),
-			Data: parseFirestoreFields(result.Document.Fields),
+			ID:    docID,
+			Path:  docPath,
+			Data:  parseFirestoreFields(result.Document.Fields),
+			Stats: calculateDocStats(result.Document.Fields, docPath),
 		})
 	}
 
@@ -648,5 +675,412 @@ func parseArrayValue(s string) map[string]interface{} {
 		"arrayValue": map[string]interface{}{
 			"values": values,
 		},
+	}
+}
+
+// HasCompositeIndexes checks if a collection has any composite indexes
+// by calling the Firestore Admin API. Returns false in emulator mode.
+func (c *Client) HasCompositeIndexes(collectionID string) (bool, error) {
+	if c.emulatorMode {
+		return false, nil
+	}
+	if c.currentProject == "" {
+		return false, fmt.Errorf("no project selected")
+	}
+
+	url := fmt.Sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/(default)/collectionGroups/%s/indexes", c.currentProject, collectionID)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return false, err
+	}
+
+	if err := c.setAuthHeader(req); err != nil {
+		return false, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, err
+	}
+
+	if resp.StatusCode != 200 {
+		return false, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Indexes []struct {
+			QueryScope string `json:"queryScope"`
+			Fields     []any  `json:"fields"`
+		} `json:"indexes"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return false, err
+	}
+
+	// Filter out single-field indexes (automatic) - composite indexes have 2+ fields
+	for _, idx := range result.Indexes {
+		if len(idx.Fields) >= 2 {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// firestoreDocNameSize calculates document name size per Firestore rules:
+// sum of each path component's UTF-8 size + 1 byte per component + 16 bytes
+func firestoreDocNameSize(docPath string) int {
+	parts := strings.Split(docPath, "/")
+	size := 16
+	for _, part := range parts {
+		size += len(part) + 1
+	}
+	return size
+}
+
+// rawFieldValueSize returns the Firestore storage size of a typed field value.
+func rawFieldValueSize(field map[string]interface{}) int {
+	if _, ok := field["nullValue"]; ok {
+		return 1
+	}
+	if _, ok := field["booleanValue"]; ok {
+		return 1
+	}
+	if _, ok := field["integerValue"]; ok {
+		return 8
+	}
+	if _, ok := field["doubleValue"]; ok {
+		return 8
+	}
+	if _, ok := field["timestampValue"]; ok {
+		return 8
+	}
+	if v, ok := field["stringValue"]; ok {
+		if s, ok := v.(string); ok {
+			return len(s) + 1
+		}
+		return 1
+	}
+	if v, ok := field["bytesValue"]; ok {
+		if s, ok := v.(string); ok {
+			// Base64 encoded, actual byte length is ~3/4 of string length
+			return len(s) * 3 / 4
+		}
+		return 0
+	}
+	if v, ok := field["referenceValue"]; ok {
+		if s, ok := v.(string); ok {
+			// Reference is stored as a document name, extract path after "documents/"
+			if idx := strings.Index(s, "/documents/"); idx >= 0 {
+				return firestoreDocNameSize(s[idx+len("/documents/"):])
+			}
+			return len(s) + 1
+		}
+		return 0
+	}
+	if _, ok := field["geoPointValue"]; ok {
+		return 16
+	}
+	if v, ok := field["mapValue"]; ok {
+		if m, ok := v.(map[string]interface{}); ok {
+			if fields, ok := m["fields"].(map[string]interface{}); ok {
+				return rawFieldsSize(fields)
+			}
+		}
+		return 0
+	}
+	if v, ok := field["arrayValue"]; ok {
+		if m, ok := v.(map[string]interface{}); ok {
+			if values, ok := m["values"].([]interface{}); ok {
+				size := 0
+				for _, item := range values {
+					if itemMap, ok := item.(map[string]interface{}); ok {
+						size += rawFieldValueSize(itemMap)
+					}
+				}
+				return size
+			}
+		}
+		return 0
+	}
+	return 0
+}
+
+// rawFieldsSize returns the total size of a Firestore fields map.
+func rawFieldsSize(fields map[string]interface{}) int {
+	size := 0
+	for key, val := range fields {
+		size += len(key) + 1
+		if valMap, ok := val.(map[string]interface{}); ok {
+			size += rawFieldValueSize(valMap)
+		}
+	}
+	return size
+}
+
+// rawFieldCount counts all fields recursively from raw Firestore typed fields.
+func rawFieldCount(fields map[string]interface{}) int {
+	count := len(fields)
+	for _, val := range fields {
+		valMap, ok := val.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if v, ok := valMap["mapValue"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if subFields, ok := m["fields"].(map[string]interface{}); ok {
+					count += rawFieldCount(subFields)
+				}
+			}
+		}
+		if v, ok := valMap["arrayValue"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if values, ok := m["values"].([]interface{}); ok {
+					count += rawArrayFieldCount(values)
+				}
+			}
+		}
+	}
+	return count
+}
+
+// rawArrayFieldCount counts fields in array elements.
+func rawArrayFieldCount(values []interface{}) int {
+	count := 0
+	for _, item := range values {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if v, ok := itemMap["mapValue"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if subFields, ok := m["fields"].(map[string]interface{}); ok {
+					count += rawFieldCount(subFields)
+				}
+			}
+		}
+		if v, ok := itemMap["arrayValue"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if vals, ok := m["values"].([]interface{}); ok {
+					count += rawArrayFieldCount(vals)
+				}
+			}
+		}
+	}
+	return count
+}
+
+// rawLeafFieldCount counts only leaf fields from raw Firestore typed fields.
+func rawLeafFieldCount(fields map[string]interface{}) int {
+	count := 0
+	for _, val := range fields {
+		valMap, ok := val.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if v, ok := valMap["mapValue"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if subFields, ok := m["fields"].(map[string]interface{}); ok {
+					count += rawLeafFieldCount(subFields)
+					continue
+				}
+			}
+		}
+		if v, ok := valMap["arrayValue"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if values, ok := m["values"].([]interface{}); ok {
+					count += rawArrayLeafCount(values)
+					continue
+				}
+			}
+		}
+		count++ // leaf field
+	}
+	return count
+}
+
+// rawArrayLeafCount counts leaf fields in array elements.
+func rawArrayLeafCount(values []interface{}) int {
+	count := 0
+	for _, item := range values {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if v, ok := itemMap["mapValue"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if subFields, ok := m["fields"].(map[string]interface{}); ok {
+					count += rawLeafFieldCount(subFields)
+					continue
+				}
+			}
+		}
+		if v, ok := itemMap["arrayValue"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if vals, ok := m["values"].([]interface{}); ok {
+					count += rawArrayLeafCount(vals)
+					continue
+				}
+			}
+		}
+		count++ // leaf value in array
+	}
+	return count
+}
+
+// rawDepth calculates the maximum nesting depth from raw Firestore fields.
+func rawDepth(fields map[string]interface{}) int {
+	maxChild := 0
+	for _, val := range fields {
+		valMap, ok := val.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if v, ok := valMap["mapValue"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if subFields, ok := m["fields"].(map[string]interface{}); ok {
+					d := rawDepth(subFields)
+					if d > maxChild {
+						maxChild = d
+					}
+				}
+			}
+		}
+		if v, ok := valMap["arrayValue"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if values, ok := m["values"].([]interface{}); ok {
+					d := rawArrayDepth(values)
+					if d > maxChild {
+						maxChild = d
+					}
+				}
+			}
+		}
+	}
+	return 1 + maxChild
+}
+
+// rawArrayDepth calculates depth within array elements.
+func rawArrayDepth(values []interface{}) int {
+	maxChild := 0
+	for _, item := range values {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if v, ok := itemMap["mapValue"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if subFields, ok := m["fields"].(map[string]interface{}); ok {
+					d := rawDepth(subFields)
+					if d > maxChild {
+						maxChild = d
+					}
+				}
+			}
+		}
+		if v, ok := itemMap["arrayValue"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if vals, ok := m["values"].([]interface{}); ok {
+					d := rawArrayDepth(vals)
+					if d > maxChild {
+						maxChild = d
+					}
+				}
+			}
+		}
+	}
+	return 1 + maxChild
+}
+
+// rawMaxFieldSizes finds the largest field name and value sizes from raw fields.
+func rawMaxFieldSizes(fields map[string]interface{}) (maxName int, maxValue int) {
+	for key, val := range fields {
+		nameLen := len(key)
+		if nameLen > maxName {
+			maxName = nameLen
+		}
+		valMap, ok := val.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		valSize := rawFieldValueSize(valMap)
+		if valSize > maxValue {
+			maxValue = valSize
+		}
+		// Recurse into maps
+		if v, ok := valMap["mapValue"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if subFields, ok := m["fields"].(map[string]interface{}); ok {
+					nn, nv := rawMaxFieldSizes(subFields)
+					if nn > maxName {
+						maxName = nn
+					}
+					if nv > maxValue {
+						maxValue = nv
+					}
+				}
+			}
+		}
+		// Recurse into arrays
+		if v, ok := valMap["arrayValue"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if values, ok := m["values"].([]interface{}); ok {
+					nn, nv := rawArrayMaxFieldSizes(values)
+					if nn > maxName {
+						maxName = nn
+					}
+					if nv > maxValue {
+						maxValue = nv
+					}
+				}
+			}
+		}
+	}
+	return
+}
+
+// rawArrayMaxFieldSizes finds max field sizes in array elements.
+func rawArrayMaxFieldSizes(values []interface{}) (maxName int, maxValue int) {
+	for _, item := range values {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if v, ok := itemMap["mapValue"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if subFields, ok := m["fields"].(map[string]interface{}); ok {
+					nn, nv := rawMaxFieldSizes(subFields)
+					if nn > maxName {
+						maxName = nn
+					}
+					if nv > maxValue {
+						maxValue = nv
+					}
+				}
+			}
+		}
+	}
+	return
+}
+
+// calculateDocStats computes accurate document stats from raw Firestore typed fields.
+func calculateDocStats(rawFields map[string]interface{}, docPath string) *DocStats {
+	docNameSize := firestoreDocNameSize(docPath)
+	maxName, maxValue := rawMaxFieldSizes(rawFields)
+	return &DocStats{
+		SizeBytes:     docNameSize + rawFieldsSize(rawFields) + 32,
+		FieldCount:    rawFieldCount(rawFields),
+		LeafFields:    rawLeafFieldCount(rawFields),
+		MaxDepth:      rawDepth(rawFields),
+		MaxFieldName:  maxName,
+		MaxFieldValue: maxValue,
+		DocNameSize:   docNameSize,
 	}
 }

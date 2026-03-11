@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/jesseduffield/gocui"
+	"github.com/marjoballabani/lazyfire/pkg/firebase"
 )
 
 // State checking helpers
@@ -57,10 +58,12 @@ func (g *Gui) selectProject(gui *gocui.Gui) error {
 		g.collections = nil
 		g.treeNodes = nil
 		g.currentDocData = nil
+		g.currentDocStats = nil
 		g.currentCollection = ""
 		g.currentDocPath = ""
 		g.selectedCollectionIdx = 0
 		g.selectedTreeIdx = 0
+		g.compositeIndexCache = make(map[string]*bool)
 		// Clear functions state
 		g.stopLogsRefresh()
 		g.functions = nil
@@ -182,6 +185,7 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 		if isCached {
 			g.currentDocPath = nodePath
 			g.currentDocData = cachedData
+			g.currentDocStats = g.statsCache[nodePath]
 			g.clearDetailsCache()
 			g.logCommand("cache", fmt.Sprintf("Using cached %s", nodeName), "success")
 			// Don't return - still need to load subcollections
@@ -195,8 +199,10 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 
 		go func() {
 			var docData map[string]any
+			var docStats *firebase.DocStats
 			if isCached {
 				docData = cachedData
+				docStats = g.statsCache[nodePath]
 			} else {
 				doc, err := g.firebaseClient.GetDocument(nodePath)
 				if err != nil {
@@ -208,6 +214,7 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 					return
 				}
 				docData = doc.Data
+				docStats = doc.Stats
 			}
 
 			subcols, err := g.firebaseClient.ListSubcollections(nodePath)
@@ -216,7 +223,29 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 				g.detailsLoading = false
 				g.currentDocPath = nodePath
 				g.currentDocData = docData
+				g.currentDocStats = docStats
 				g.docCache[nodePath] = docData // Cache for future use
+				g.statsCache[nodePath] = docStats
+				g.clearDetailsCache()
+
+				// Async check for composite indexes if not cached
+				parts := strings.Split(nodePath, "/")
+				if len(parts) >= 2 {
+					collID := parts[len(parts)-2]
+					if _, ok := g.compositeIndexCache[collID]; !ok {
+						go func() {
+							hasComposite, err := g.firebaseClient.HasCompositeIndexes(collID)
+							g.g.Update(func(gui *gocui.Gui) error {
+								if err == nil {
+									val := hasComposite
+									g.compositeIndexCache[collID] = &val
+									g.clearDetailsCache()
+								}
+								return nil
+							})
+						}()
+					}
+				}
 
 				if err != nil || len(subcols) == 0 {
 					if !isCached {
@@ -394,6 +423,7 @@ func (g *Gui) fetchProjectDetails(gui *gocui.Gui) error {
 			}
 			g.currentProjectInfo = details
 			g.currentDocData = nil
+			g.currentDocStats = nil
 			g.logCommand("api", fmt.Sprintf("GetProjectDetails(%s) → success", project.ID), "success")
 			return nil
 		})
