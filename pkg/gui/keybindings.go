@@ -41,6 +41,7 @@ func (g *Gui) globalBindings(km *KeybindingManager) []*Binding {
 			Contexts: map[Context]func() error{
 				ContextQuery:       g.queryClose,
 				ContextQuerySelect: g.querySelectClose,
+				ContextConfirm:     g.doConfirmCancel,
 			},
 		},
 		{
@@ -222,6 +223,7 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 				ContextHelp:        g.helpClose,
 				ContextQuery:       g.queryEnter,
 				ContextQuerySelect: g.querySelectConfirm,
+				ContextConfirm:     g.doConfirmAccept,
 			},
 		},
 	}
@@ -259,7 +261,7 @@ func (g *Gui) filterBindings(km *KeybindingManager) []*Binding {
 
 	// Character handlers for filter input (includes jq syntax chars)
 	// Exclude chars that have dedicated context-aware bindings: hjkl, csrqveFQ, ?@/, []
-	filterChars := "abdfgimnoptuwxyzABCDEGHIJKLMNOPRSTUVWXYZ0123456789"
+	filterChars := "abdfgimnoptuwxyzABCDEGHIJKLMNOPRTUVWXYZ0123456789"
 	filterChars += "-_. "
 	filterChars += "|(){}:\"'`,<>=!+*^$#~;&%\\"
 	for _, ch := range filterChars {
@@ -333,6 +335,17 @@ func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
 				ContextModal:  g.blockAction,
 				ContextSelect: g.doToggleSelectMode, // Toggle off
 				ContextQuery:  g.queryInsertChar('v'),
+			},
+		},
+		{
+			Key:         'S',
+			Handler:     g.doScanCollections,
+			Description: "Scan collections health",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.filterInsertUpperS,
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('S'),
 			},
 		},
 		{

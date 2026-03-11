@@ -326,6 +326,43 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 	}
 
 	// Query builder modal
+	// Confirm dialog
+	if g.confirmOpen {
+		modalWidth := 50
+		modalHeight := 10
+		modalX := (maxX - modalWidth) / 2
+		modalY := (maxY - modalHeight) / 2
+
+		if v, err := gui.SetView(g.views.confirm, modalX, modalY, modalX+modalWidth, modalY+modalHeight, 0); err != nil {
+			if !errors.Is(err, gocui.ErrUnknownView) {
+				return err
+			}
+			v.Title = " " + g.confirmTitle + " "
+			v.TitleColor = g.theme.ActiveBorderColor
+			v.FrameColor = g.theme.ActiveBorderColor
+			v.FrameRunes = g.roundedFrameRunes
+			v.BgColor = gocui.ColorDefault
+			v.FgColor = gocui.ColorDefault
+		}
+
+		if v, err := gui.View(g.views.confirm); err == nil {
+			v.Clear()
+			v.Title = " " + g.confirmTitle + " "
+			fmt.Fprintln(v, "")
+			for _, line := range strings.Split(g.confirmMessage, "\n") {
+				fmt.Fprintf(v, "  %s\n", line)
+			}
+			fmt.Fprintln(v, "")
+			fmt.Fprintln(v, "  \033[32mEnter\033[0m confirm    \033[31mEsc\033[0m cancel")
+			if _, err := gui.SetCurrentView(g.views.confirm); err != nil {
+				return fmt.Errorf("failed to set confirm view: %w", err)
+			}
+		}
+
+		return nil
+	}
+	_ = gui.DeleteView(g.views.confirm)
+
 	if g.queryModalOpen {
 		modalWidth := 50
 		modalHeight := 20
@@ -898,6 +935,17 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 }
 
 func (g *Gui) updateDetailsView(v *gocui.View) {
+	// Scan results / progress (takes priority over everything)
+	if g.scanRunning {
+		v.Clear()
+		fmt.Fprint(v, g.getLoadingText(fmt.Sprintf("Scanning collections... %s", g.scanProgress)))
+		return
+	}
+	if g.scanResults != nil && g.currentDocData == nil {
+		g.renderScanResults(v)
+		return
+	}
+
 	// Determine context based on current panel (or previous if in details)
 	showFunctions := g.collectionsTab == "functions" &&
 		(g.currentColumn == "collections" || (g.currentColumn == "details" && g.previousColumn == "collections"))
@@ -1150,6 +1198,90 @@ func (g *Gui) showWelcome(v *gocui.View) {
 	fmt.Fprintln(v, "")
 	fmt.Fprintln(v, "\033[90m     Created by Marjo Ballabani\033[0m")
 	fmt.Fprintln(v, "\033[36m     github.com/marjoballabani/lazyfire\033[0m")
+}
+
+func (g *Gui) renderScanResults(v *gocui.View) {
+	if g.cachedDetailsContent != "" && g.cachedDetailsDocPath == "__scan__" {
+		if g.detailsViewDirty {
+			v.SetContent(g.cachedDetailsContent)
+			g.detailsViewDirty = false
+		}
+		return
+	}
+
+	g.detailsScrollPos = 0
+
+	var content strings.Builder
+
+	okCount, warnCount, skipCount := 0, 0, 0
+	for _, r := range g.scanResults {
+		switch r.Status {
+		case "ok":
+			okCount++
+		case "warning":
+			warnCount++
+		case "skipped":
+			skipCount++
+		}
+	}
+
+	content.WriteString("\033[36m--- Collection Health Scan ---\033[0m\n\n")
+	content.WriteString(fmt.Sprintf("  \033[90mProject:\033[0m  %s\n", g.currentProject))
+	content.WriteString(fmt.Sprintf("  \033[90mScanned:\033[0m  %d collections\n", len(g.scanResults)))
+	content.WriteString(fmt.Sprintf("  \033[32mHealthy:\033[0m  %d", okCount))
+	if warnCount > 0 {
+		content.WriteString(fmt.Sprintf("  \033[33mWarnings:\033[0m %d", warnCount))
+	}
+	if skipCount > 0 {
+		content.WriteString(fmt.Sprintf("  \033[31mSkipped:\033[0m  %d", skipCount))
+	}
+	content.WriteString("\n\n")
+
+	// Show warnings first, then ok, then skipped
+	for _, status := range []string{"warning", "ok", "skipped"} {
+		for _, r := range g.scanResults {
+			if r.Status != status {
+				continue
+			}
+
+			var icon, color string
+			switch r.Status {
+			case "ok":
+				icon = "\033[32m[OK]\033[0m"
+				color = "\033[0m"
+			case "warning":
+				icon = "\033[33m[!!]\033[0m"
+				color = "\033[33m"
+			case "skipped":
+				icon = "\033[31m[--]\033[0m"
+				color = "\033[90m"
+			}
+
+			content.WriteString(fmt.Sprintf("  %s %s%s\033[0m  %s%s\033[0m\n", icon, color, r.Collection, "\033[90m", r.Message))
+
+			// Build warning set for highlighting
+			warningSet := make(map[string]bool)
+			for _, w := range r.Warnings {
+				warningSet[w] = true
+			}
+			for _, m := range r.Metrics {
+				if warningSet[m] {
+					content.WriteString(fmt.Sprintf("       \033[33m! %s\033[0m\n", m))
+				} else {
+					content.WriteString(fmt.Sprintf("       \033[90m- %s\033[0m\n", m))
+				}
+			}
+		}
+	}
+
+	content.WriteString("\n\033[90m  Press Esc to dismiss\033[0m\n")
+
+	g.cachedDetailsContent = content.String()
+	g.cachedDetailsDocPath = "__scan__"
+	g.cachedDetailsLines = nil
+	g.cachedDetailsHeader = ""
+	v.SetContent(g.cachedDetailsContent)
+	g.detailsViewDirty = false
 }
 
 func (g *Gui) updateCommandsView(v *gocui.View) {

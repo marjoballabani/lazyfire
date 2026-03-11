@@ -5,9 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/jesseduffield/gocui"
+	"github.com/marjoballabani/lazyfire/pkg/firebase"
 )
 
 // Actions - clean handler functions without state checks.
@@ -32,6 +36,8 @@ func (g *Gui) doEscape() error {
 	}
 	// Return from details to previous panel (keeps select mode)
 	if g.currentColumn == "details" {
+		g.scanResults = nil
+		g.clearDetailsCache()
 		target := g.previousColumn
 		if target == "" {
 			target = "tree"
@@ -137,6 +143,23 @@ func (g *Gui) filterInsertS() error         { return g.insertFilterChar(g.g, 's'
 func (g *Gui) filterInsertR() error         { return g.insertFilterChar(g.g, 'r') }
 func (g *Gui) filterInsertQ() error      { return g.insertFilterChar(g.g, 'q') }
 func (g *Gui) filterInsertUpperF() error { return g.insertFilterChar(g.g, 'F') }
+func (g *Gui) filterInsertUpperS() error { return g.insertFilterChar(g.g, 'S') }
+
+func (g *Gui) doConfirmAccept() error {
+	if g.confirmCallback != nil {
+		cb := g.confirmCallback
+		g.confirmOpen = false
+		g.confirmCallback = nil
+		cb()
+	}
+	return g.Layout(g.g)
+}
+
+func (g *Gui) doConfirmCancel() error {
+	g.confirmOpen = false
+	g.confirmCallback = nil
+	return g.Layout(g.g)
+}
 func (g *Gui) filterInsertV() error         { return g.insertFilterChar(g.g, 'v') }
 func (g *Gui) filterInsertE() error         { return g.insertFilterChar(g.g, 'e') }
 func (g *Gui) filterInsertSlash() error        { return g.insertFilterChar(g.g, '/') }
@@ -411,11 +434,23 @@ func (g *Gui) makeFilterCharAction(ch rune) func() error {
 
 // doCopyJSON copies current document to clipboard
 func (g *Gui) doCopyJSON() error {
+	if g.scanResults != nil && g.currentDocData == nil {
+		return g.copyScanReport()
+	}
+	if g.currentColumn != "tree" && g.currentColumn != "details" {
+		return nil
+	}
 	return g.copyJSONAction()
 }
 
 // doSaveJSON saves current document to file
 func (g *Gui) doSaveJSON() error {
+	if g.scanResults != nil && g.currentDocData == nil {
+		return g.saveScanReport()
+	}
+	if g.currentColumn != "tree" && g.currentColumn != "details" {
+		return nil
+	}
 	return g.saveJSONAction()
 }
 
@@ -672,6 +707,7 @@ func (g *Gui) doDetailsClick() error {
 		g.helpPopup = nil
 		return g.Layout(g.g)
 	}
+	g.previousColumn = g.currentColumn
 	g.currentColumn = "details"
 	return g.Layout(g.g)
 }
@@ -1014,4 +1050,410 @@ func (g *Gui) querySelectConfirm() error {
 func (g *Gui) querySelectClose() error {
 	g.closeQuerySelect()
 	return g.Layout(g.g)
+}
+
+// doScanCollections shows a confirmation dialog before scanning collections.
+// Only works from the projects panel.
+func (g *Gui) doScanCollections() error {
+	if g.currentColumn != "projects" {
+		return nil
+	}
+	if g.scanRunning {
+		g.logCommand("scan", "Scan already in progress", "error")
+		return g.Layout(g.g)
+	}
+
+	// Always use the focused project in the list
+	filtered := g.getFilteredProjects()
+	if g.selectedProjectIndex >= len(filtered) || len(filtered) == 0 {
+		g.logCommand("scan", "No project available", "error")
+		return g.Layout(g.g)
+	}
+	projectID := filtered[g.selectedProjectIndex].ID
+
+	g.scanProjectID = projectID
+	g.confirmOpen = true
+	g.confirmTitle = "Collection Health Scan"
+	g.confirmMessage = fmt.Sprintf("This will fetch documents from every collection\nin project '%s' to check Firestore limits.\n\nThis may be slow and consume read quota.", projectID)
+	g.confirmCallback = g.executeScan
+	return g.Layout(g.g)
+}
+
+// executeScan runs the actual collection scan after confirmation.
+func (g *Gui) executeScan() {
+	// Select the project being scanned
+	filtered := g.getFilteredProjects()
+	for i, p := range filtered {
+		if p.ID == g.scanProjectID {
+			g.selectedProjectIndex = i
+			break
+		}
+	}
+
+	// Move to details panel
+	g.previousColumn = g.currentColumn
+	g.currentColumn = "details"
+
+	g.scanRunning = true
+	g.scanResults = nil
+	g.scanProgress = "loading collections..."
+	g.currentDocData = nil
+	g.currentDocStats = nil
+	g.currentDocPath = ""
+	g.clearDetailsCache()
+	g.logCommand("scan", fmt.Sprintf("Scanning %s...", g.scanProjectID), "running")
+
+	projectID := g.scanProjectID
+
+	go func() {
+		// Set project if needed
+		if g.currentProject != projectID {
+			if err := g.firebaseClient.SetCurrentProject(projectID); err != nil {
+				g.g.Update(func(gui *gocui.Gui) error {
+					g.scanRunning = false
+					g.logCommand("scan", fmt.Sprintf("Failed to set project: %v", err), "error")
+					return nil
+				})
+				return
+			}
+			g.g.Update(func(gui *gocui.Gui) error {
+				g.currentProject = projectID
+				return nil
+			})
+		}
+
+		// Fetch collections
+		collections, err := g.firebaseClient.ListCollections()
+		if err != nil {
+			g.g.Update(func(gui *gocui.Gui) error {
+				g.scanRunning = false
+				g.logCommand("scan", fmt.Sprintf("Failed to list collections: %v", err), "error")
+				return nil
+			})
+			return
+		}
+
+		if len(collections) == 0 {
+			g.g.Update(func(gui *gocui.Gui) error {
+				g.scanRunning = false
+				g.scanResults = []ScanResult{}
+				g.logCommand("scan", "No collections found", "success")
+				return nil
+			})
+			return
+		}
+
+		collNames := make([]string, len(collections))
+		for i, c := range collections {
+			collNames[i] = c.Name
+		}
+
+		g.g.Update(func(gui *gocui.Gui) error {
+			g.scanProgress = fmt.Sprintf("0/%d collections", len(collNames))
+			return nil
+		})
+
+		var results []ScanResult
+
+		for i, collName := range collNames {
+			// Update progress
+			g.g.Update(func(gui *gocui.Gui) error {
+				g.scanProgress = fmt.Sprintf("%d/%d collections", i+1, len(collNames))
+				return nil
+			})
+
+			docs, err := g.firebaseClient.ListDocuments(collName, 2)
+			if err != nil {
+				results = append(results, ScanResult{
+					Collection: collName,
+					Status:     "skipped",
+					Message:    fmt.Sprintf("Failed to list: %v", err),
+				})
+				continue
+			}
+
+			if len(docs) == 0 {
+				results = append(results, ScanResult{
+					Collection: collName,
+					Status:     "ok",
+					Message:    "Empty collection",
+				})
+				continue
+			}
+
+			// Check first document
+			doc := docs[0]
+			metrics, warnings := checkDocLimits(doc.Stats, doc.Path)
+
+			if len(warnings) == 0 {
+				results = append(results, ScanResult{
+					Collection: collName,
+					Status:     "ok",
+					Message:    fmt.Sprintf("%s - all metrics healthy", doc.ID),
+					DocPath:    doc.Path,
+					Metrics:    metrics,
+				})
+				continue
+			}
+
+			// First doc has warnings - check second if available
+			if len(docs) > 1 {
+				doc2 := docs[1]
+				_, warnings2 := checkDocLimits(doc2.Stats, doc2.Path)
+				if len(warnings2) > 0 {
+					// Both docs have warnings - likely a collection-wide pattern
+					results = append(results, ScanResult{
+						Collection: collName,
+						Status:     "warning",
+						Message:    fmt.Sprintf("Pattern confirmed across docs (%s, %s)", doc.ID, doc2.ID),
+						DocPath:    doc.Path,
+						Metrics:    metrics,
+						Warnings:   warnings,
+					})
+					continue
+				}
+			}
+
+			// Only first doc has issues
+			results = append(results, ScanResult{
+				Collection: collName,
+				Status:     "warning",
+				Message:    fmt.Sprintf("%s has issues", doc.ID),
+				DocPath:    doc.Path,
+				Metrics:    metrics,
+				Warnings:   warnings,
+			})
+		}
+
+		g.g.Update(func(gui *gocui.Gui) error {
+			g.scanRunning = false
+			g.scanResults = results
+			g.clearDetailsCache()
+
+			warningCount := 0
+			for _, r := range results {
+				if r.Status == "warning" {
+					warningCount++
+				}
+			}
+			if warningCount > 0 {
+				g.logCommand("scan", fmt.Sprintf("Done: %d/%d collections have warnings", warningCount, len(results)), "error")
+			} else {
+				g.logCommand("scan", fmt.Sprintf("Done: all %d collections healthy", len(results)), "success")
+			}
+			return nil
+		})
+	}()
+
+	g.g.Update(func(gui *gocui.Gui) error { return nil })
+}
+
+// formatScanReportMarkdown generates a markdown scan report.
+func (g *Gui) formatScanReportMarkdown() string {
+	var b strings.Builder
+
+	okCount, warnCount, skipCount := 0, 0, 0
+	for _, r := range g.scanResults {
+		switch r.Status {
+		case "ok":
+			okCount++
+		case "warning":
+			warnCount++
+		case "skipped":
+			skipCount++
+		}
+	}
+
+	b.WriteString(fmt.Sprintf("# Collection Health Scan\n\n"))
+	b.WriteString(fmt.Sprintf("**Project:** `%s`\n\n", g.scanProjectID))
+
+	// Summary
+	summary := fmt.Sprintf("| Scanned | Healthy | Warnings | Skipped |\n")
+	summary += fmt.Sprintf("|:-------:|:-------:|:--------:|:-------:|\n")
+	summary += fmt.Sprintf("| %d | %d | %d | %d |\n", len(g.scanResults), okCount, warnCount, skipCount)
+	b.WriteString(summary)
+	b.WriteString("\n")
+
+	// Warnings section
+	hasWarnings := false
+	for _, r := range g.scanResults {
+		if r.Status != "warning" {
+			continue
+		}
+		if !hasWarnings {
+			b.WriteString("## Warnings\n\n")
+			hasWarnings = true
+		}
+		b.WriteString(fmt.Sprintf("### %s `%s`\n\n", warningIcon, r.Collection))
+		b.WriteString(fmt.Sprintf("> %s\n\n", r.Message))
+
+		warningSet := make(map[string]bool)
+		for _, w := range r.Warnings {
+			warningSet[w] = true
+		}
+
+		b.WriteString("| Metric | Value | Limit | Usage |\n")
+		b.WriteString("|--------|------:|------:|------:|\n")
+		for _, m := range r.Metrics {
+			name, value, limit, pct := parseMetricLine(m)
+			flag := ""
+			if warningSet[m] {
+				flag = " " + warningIcon
+			}
+			b.WriteString(fmt.Sprintf("| %s%s | %s | %s | %s |\n", name, flag, value, limit, pct))
+		}
+		b.WriteString("\n")
+	}
+
+	// Healthy section
+	hasHealthy := false
+	for _, r := range g.scanResults {
+		if r.Status != "ok" {
+			continue
+		}
+		if !hasHealthy {
+			b.WriteString("## Healthy\n\n")
+			hasHealthy = true
+		}
+
+		if len(r.Metrics) == 0 {
+			b.WriteString(fmt.Sprintf("- %s **%s** - %s\n", checkIcon, r.Collection, r.Message))
+			continue
+		}
+
+		b.WriteString(fmt.Sprintf("<details>\n<summary>%s <strong>%s</strong></summary>\n\n", checkIcon, r.Collection))
+		b.WriteString("| Metric | Value | Limit | Usage |\n")
+		b.WriteString("|--------|------:|------:|------:|\n")
+		for _, m := range r.Metrics {
+			name, value, limit, pct := parseMetricLine(m)
+			b.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", name, value, limit, pct))
+		}
+		b.WriteString("\n</details>\n\n")
+	}
+
+	// Skipped section
+	hasSkipped := false
+	for _, r := range g.scanResults {
+		if r.Status != "skipped" {
+			continue
+		}
+		if !hasSkipped {
+			b.WriteString("## Skipped\n\n")
+			hasSkipped = true
+		}
+		b.WriteString(fmt.Sprintf("- %s **%s** - %s\n", skipIcon, r.Collection, r.Message))
+	}
+
+	b.WriteString("\n---\n*Generated by [LazyFire](https://github.com/marjoballabani/lazyfire)*\n")
+
+	return b.String()
+}
+
+const (
+	warningIcon = "\u26a0\ufe0f" // warning sign
+	checkIcon   = "\u2705"       // check mark
+	skipIcon    = "\u23ed\ufe0f" // skip
+)
+
+// parseMetricLine extracts name, value, limit, pct from "Name: 123/456 (27%)"
+func parseMetricLine(m string) (name, value, limit, pct string) {
+	// Format: "Size: 123/456 (27%)"
+	colonIdx := strings.Index(m, ": ")
+	if colonIdx == -1 {
+		return m, "", "", ""
+	}
+	name = m[:colonIdx]
+	rest := m[colonIdx+2:]
+
+	slashIdx := strings.Index(rest, "/")
+	if slashIdx == -1 {
+		return name, rest, "", ""
+	}
+	value = rest[:slashIdx]
+
+	parenIdx := strings.Index(rest, " (")
+	if parenIdx == -1 {
+		limit = rest[slashIdx+1:]
+		return
+	}
+	limit = rest[slashIdx+1 : parenIdx]
+	pct = rest[parenIdx+2 : len(rest)-1] // strip trailing ")"
+	return
+}
+
+func (g *Gui) copyScanReport() error {
+	text := g.formatScanReportMarkdown()
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbcopy")
+	case "linux":
+		cmd = exec.Command("xclip", "-selection", "clipboard")
+	default:
+		g.logCommand("copy", "Clipboard not supported on this platform", "error")
+		return nil
+	}
+
+	cmd.Stdin = strings.NewReader(text)
+	if err := cmd.Run(); err != nil {
+		g.logCommand("copy", fmt.Sprintf("Failed to copy: %v", err), "error")
+		return nil
+	}
+
+	g.logCommand("copy", "Scan report copied to clipboard", "success")
+	return nil
+}
+
+func (g *Gui) saveScanReport() error {
+	text := g.formatScanReportMarkdown()
+
+	home, _ := os.UserHomeDir()
+	filename := fmt.Sprintf("lazyfire-scan_%s.md", g.scanProjectID)
+	fullPath := filepath.Join(home, "Downloads", filename)
+
+	if err := os.WriteFile(fullPath, []byte(text), 0644); err != nil {
+		g.logCommand("save", fmt.Sprintf("Failed to save: %v", err), "error")
+		return nil
+	}
+
+	g.logCommand("save", fmt.Sprintf("Saved to %s", fullPath), "success")
+	return nil
+}
+
+// checkDocLimits checks a document's stats against Firestore limits.
+// Returns all metrics as strings, and warnings for any metric above 70%.
+func checkDocLimits(stats *firebase.DocStats, docPath string) (metrics []string, warnings []string) {
+	if stats == nil {
+		return nil, nil
+	}
+
+	indexEntries := stats.LeafFields * 2
+
+	type metricDef struct {
+		name  string
+		value int
+		limit int
+	}
+	defs := []metricDef{
+		{"Size", stats.SizeBytes, maxDocSizeBytes},
+		{"Index entries", indexEntries, maxIndexEntries},
+		{"Depth", stats.MaxDepth, maxDepth},
+		{"Field name", stats.MaxFieldName, maxFieldNameBytes},
+		{"Field value", stats.MaxFieldValue, maxFieldValueBytes},
+		{"Doc path", stats.DocNameSize, maxDocNameBytes},
+	}
+
+	for _, d := range defs {
+		pct := d.value * 100 / d.limit
+		label := fmt.Sprintf("%s: %d/%d (%d%%)", d.name, d.value, d.limit, pct)
+		metrics = append(metrics, label)
+		if pct > 100 {
+			warnings = append(warnings, fmt.Sprintf("%s: %d/%d (OVER LIMIT)", d.name, d.value, d.limit))
+		} else if pct > 70 {
+			warnings = append(warnings, label)
+		}
+	}
+
+	return metrics, warnings
 }

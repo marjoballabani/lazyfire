@@ -11,7 +11,7 @@ import (
 // State checking helpers
 
 func (g *Gui) isModalOpen() bool {
-	return g.modalOpen || g.helpOpen
+	return g.modalOpen || g.helpOpen || g.confirmOpen
 }
 
 // setFocus sets the current column and updates gocui's current view
@@ -472,6 +472,7 @@ func (g *Gui) buildHelpPopup() {
 		items = append(items,
 			PopupItem{Key: "Enter", Label: "Fetch project details", Action: g.doEnter},
 			PopupItem{Key: "Space", Label: "Select project", Action: g.doSpace},
+			PopupItem{Key: "S", Label: "Scan collections health", Action: g.doScanCollections},
 		)
 	case "collections":
 		items = append(items,

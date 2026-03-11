@@ -49,8 +49,17 @@ func (g *Gui) openQueryModal() error {
 		nodeIdx = -1
 	}
 
+	// Fall back to focused collection in the list
 	if collectionPath == "" {
-		g.logCommand("F", "No collection selected", "error")
+		filtered := g.getFilteredCollections()
+		if g.selectedCollectionIdx < len(filtered) && len(filtered) > 0 {
+			collectionPath = filtered[g.selectedCollectionIdx].Name
+			nodeIdx = -1
+		}
+	}
+
+	if collectionPath == "" {
+		g.logCommand("F", "No collection available", "error")
 		return nil
 	}
 

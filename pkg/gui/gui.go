@@ -31,6 +31,16 @@ type TreeNode struct {
 	Expanded    bool
 }
 
+// ScanResult holds the health check result for a single collection.
+type ScanResult struct {
+	Collection string
+	Status     string // "ok", "warning", "error", "skipped"
+	Message    string // Human-readable summary
+	DocPath    string // Path of the checked document
+	Metrics    []string // All metric values (always shown)
+	Warnings   []string // Metrics above 70% threshold
+}
+
 type Gui struct {
 	g              *gocui.Gui
 	config         *config.Config
@@ -68,6 +78,18 @@ type Gui struct {
 	collectionCache     map[string][]string       // Cache of document paths per collection
 	compositeIndexCache map[string]*bool          // nil=not checked, false=no composites, true=has composites
 
+	// Scan state
+	scanResults   []ScanResult
+	scanRunning   bool
+	scanProgress  string // "3/12 collections"
+	scanProjectID string // Project ID being scanned
+
+	// Confirm dialog state
+	confirmOpen     bool
+	confirmTitle    string
+	confirmMessage  string
+	confirmCallback func()
+
 	// Details state
 	currentDocPath     string
 	currentDocData     map[string]any
@@ -100,6 +122,7 @@ type Gui struct {
 		queryModal  string
 		queryInput  string
 		querySelect string
+		confirm     string
 	}
 
 	// Current column: "projects", "collections", "tree", "details"
@@ -228,6 +251,7 @@ func NewGui(config *config.Config, firebaseClient *firebase.Client, version stri
 	gui.views.queryModal = "queryModal"
 	gui.views.queryInput = "queryInput"
 	gui.views.querySelect = "querySelect"
+	gui.views.confirm = "confirm"
 	gui.views.background = "background"
 
 	// Configure gocui

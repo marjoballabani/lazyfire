@@ -13,6 +13,7 @@ const (
 	ContextSelect      Context = "select"      // Visual selection mode
 	ContextQuery       Context = "query"       // Query builder modal
 	ContextQuerySelect Context = "querySelect" // Query select popup
+	ContextConfirm     Context = "confirm"     // Confirm dialog
 )
 
 // Binding represents a keybinding with context-aware handling
@@ -105,6 +106,9 @@ func (g *Gui) newDisabledReasons() DisabledReasons {
 
 // getContext returns the current UI context
 func (g *Gui) getContext() Context {
+	if g.confirmOpen {
+		return ContextConfirm
+	}
 	if g.querySelectOpen {
 		return ContextQuerySelect
 	}
@@ -182,6 +186,12 @@ func (km *KeybindingManager) wrapHandler(b *Binding) func(*gocui.Gui, *gocui.Vie
 			if contextHandler, ok := b.Contexts[ctx]; ok {
 				return contextHandler()
 			}
+		}
+
+		// Block all unhandled keys/clicks in modal dialogs
+		if ctx == ContextConfirm || ctx == ContextQuery || ctx == ContextQuerySelect {
+			// Re-trigger layout to restore focus to modal view
+			return km.gui.Layout(km.gui.g)
 		}
 
 		// Check if binding is disabled for this context
