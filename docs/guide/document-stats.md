@@ -14,6 +14,7 @@ Firestore has specific limits for documents:
 | Field name size | 1,500 bytes |
 | Field value size | ~1 MiB |
 | Document path | 6 KiB (6,144 bytes) |
+| Index entries | 40,000 |
 
 ## Stats Display
 
@@ -56,9 +57,16 @@ Largest single field value size. Watch for large strings or embedded JSON.
 ### Path
 Document path length. `collection/doc/subcol/subdoc` - relevant for deeply nested documents.
 
+### Index Entries
+Estimated number of index entries for the document. Firestore creates index entries for each field, and composite indexes multiply this. LazyFire calls the Firestore Admin API to detect composite indexes and provide an accurate count. When composite indexes cannot be determined (emulator mode or API errors), the count is shown with a `~` prefix to indicate it is approximate.
+
 ## Use Cases
 
 - **Pre-migration checks** - Verify documents won't exceed limits
 - **Debugging** - Find why writes are failing
 - **Optimization** - Identify documents that need restructuring
 - **Monitoring** - Track document growth over time
+
+## See Also
+
+- [Collection Health Scan](/guide/collection-health-scan) - Scan all collections in a project at once

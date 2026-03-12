@@ -2,15 +2,22 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: 'LazyFire',
-  description: 'A TUI Firebase browser for the terminal',
+  description: 'A terminal UI for browsing Firebase Firestore, monitoring Cloud Functions, and streaming logs - built for developers who live in the terminal.',
   base: '/lazyfire/',
 
   head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/lazyfire/logo.svg' }],
     ['meta', { name: 'theme-color', content: '#ff6f00' }],
     ['meta', { property: 'og:type', content: 'website' }],
-    ['meta', { property: 'og:title', content: 'LazyFire' }],
-    ['meta', { property: 'og:description', content: 'A TUI Firebase browser for the terminal' }],
+    ['meta', { property: 'og:title', content: 'LazyFire - Firebase in your terminal' }],
+    ['meta', { property: 'og:description', content: 'Browse Firestore, monitor Cloud Functions, and view live logs from your terminal. Vim keybindings, query builder, collection health scans, and more.' }],
+    ['meta', { property: 'og:image', content: 'https://marjoballabani.github.io/lazyfire/preview.gif' }],
+    ['meta', { property: 'og:url', content: 'https://marjoballabani.github.io/lazyfire/' }],
+    ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
+    ['meta', { name: 'twitter:title', content: 'LazyFire - Firebase in your terminal' }],
+    ['meta', { name: 'twitter:description', content: 'Browse Firestore, monitor Cloud Functions, and view live logs from your terminal.' }],
+    ['meta', { name: 'twitter:image', content: 'https://marjoballabani.github.io/lazyfire/preview.gif' }],
+    ['meta', { name: 'keywords', content: 'firebase, firestore, tui, terminal, cli, cloud functions, go, lazygit, vim' }],
   ],
 
   themeConfig: {
@@ -23,7 +30,8 @@ export default defineConfig({
         text: 'Links',
         items: [
           { text: 'GitHub', link: 'https://github.com/marjoballabani/lazyfire' },
-          { text: 'Releases', link: 'https://github.com/marjoballabani/lazyfire/releases' }
+          { text: 'Releases', link: 'https://github.com/marjoballabani/lazyfire/releases' },
+          { text: 'Changelog', link: 'https://github.com/marjoballabani/lazyfire/blob/main/CHANGELOG.md' }
         ]
       }
     ],
@@ -47,7 +55,14 @@ export default defineConfig({
             { text: 'Query Builder', link: '/guide/query-builder' },
             { text: 'Visual Select Mode', link: '/guide/select-mode' },
             { text: 'Document Stats', link: '/guide/document-stats' },
+            { text: 'Collection Health Scan', link: '/guide/collection-health-scan' },
             { text: 'Filtering & Search', link: '/guide/filtering' }
+          ]
+        },
+        {
+          text: 'Advanced',
+          items: [
+            { text: 'Emulator Mode', link: '/guide/emulator-mode' }
           ]
         }
       ],

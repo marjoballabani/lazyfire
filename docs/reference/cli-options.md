@@ -16,12 +16,6 @@ Show version information.
 
 ```bash
 lazyfire --version
-lazyfire -v
-```
-
-Output:
-```
-lazyfire 0.1.35
 ```
 
 ## Configuration
@@ -37,6 +31,8 @@ LazyFire uses your existing Firebase CLI credentials. Make sure you're logged in
 ```bash
 firebase login
 ```
+
+In [emulator mode](/guide/emulator-mode), authentication is skipped entirely.
 
 ## Examples
 

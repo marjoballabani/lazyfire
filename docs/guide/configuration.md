@@ -75,6 +75,25 @@ ui:
     selectedLineBgColor: ["#313244", "bold"]
 ```
 
+## Emulator Mode
+
+Connect to a local Firebase Emulator instead of production:
+
+```yaml
+emulator:
+  enabled: true
+  projectId: "my-local-project"
+  firestoreHost: "localhost:8080"
+```
+
+| Option | Required | Default | Description |
+|--------|----------|---------|-------------|
+| `enabled` | yes | `false` | Enable emulator mode |
+| `projectId` | yes | - | Project ID (can be any string) |
+| `firestoreHost` | no | `localhost:8080` | Emulator host and port |
+
+See [Emulator Mode](/guide/emulator-mode) for details.
+
 ## Default Values
 
 If no config file exists, LazyFire uses these defaults:
