@@ -558,11 +558,27 @@
 
 .comparison-table table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   margin: 1.5rem 0 2rem;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--vp-c-divider);
+}
+
+.comparison-table th:first-child,
+.comparison-table td:first-child {
+  width: 25%;
+}
+
+.comparison-table th:nth-child(2),
+.comparison-table td:nth-child(2) {
+  width: 37.5%;
+}
+
+.comparison-table th:nth-child(3),
+.comparison-table td:nth-child(3) {
+  width: 37.5%;
 }
 
 .comparison-table th {
