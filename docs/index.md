@@ -59,48 +59,111 @@ features:
     link: /reference/themes
 ---
 
-<div class="home-content">
-
-## Installation
-
-::: code-group
-
-```bash [Homebrew (Recommended)]
-brew install marjoballabani/tap/lazyfire
-```
-
-```bash [Go Install]
-go install github.com/marjoballabani/lazyfire@latest
-```
-
-```bash [Download Binary]
-# macOS (Apple Silicon)
-curl -L https://github.com/marjoballabani/lazyfire/releases/latest/download/lazyfire_darwin_arm64.tar.gz | tar xz
-
-# macOS (Intel)
-curl -L https://github.com/marjoballabani/lazyfire/releases/latest/download/lazyfire_darwin_amd64.tar.gz | tar xz
-
-# Linux
-curl -L https://github.com/marjoballabani/lazyfire/releases/latest/download/lazyfire_linux_amd64.tar.gz | tar xz
-```
-
-:::
-
-Then run:
-
-```bash
-lazyfire
-```
-
-## Preview
-
-![LazyFire Preview](/preview.gif){.preview-img}
-
-## Why LazyFire?
-
 <script setup>
 import { withBase } from 'vitepress'
 </script>
+
+<div class="home-content">
+
+<div class="section-divider"></div>
+
+## Quick Start
+
+<div class="quick-start">
+  <div class="terminal-window">
+    <div class="terminal-header">
+      <div class="terminal-dot red"></div>
+      <div class="terminal-dot yellow"></div>
+      <div class="terminal-dot green"></div>
+      <span class="terminal-title">Terminal</span>
+    </div>
+    <div class="terminal-body">
+      <div class="terminal-line">
+        <span class="terminal-prompt">$</span>
+        <span class="terminal-cmd">brew install marjoballabani/tap/lazyfire</span>
+      </div>
+      <div class="terminal-line">
+        <span class="terminal-prompt">$</span>
+        <span class="terminal-cmd">lazyfire</span>
+      </div>
+    </div>
+  </div>
+  <div class="quick-start-alt">
+    <div class="alt-method">
+      <span class="alt-label">Go</span>
+      <code>go install github.com/marjoballabani/lazyfire@latest</code>
+    </div>
+    <div class="alt-method">
+      <span class="alt-label">Binary</span>
+      <code>curl -L https://github.com/.../lazyfire_darwin_arm64.tar.gz | tar xz</code>
+    </div>
+    <a :href="withBase('/guide/installation')" class="alt-link">All installation options</a>
+  </div>
+</div>
+
+<div class="section-divider"></div>
+
+## Preview
+
+<div class="preview-wrapper">
+  <div class="preview-frame">
+    <div class="terminal-header">
+      <div class="terminal-dot red"></div>
+      <div class="terminal-dot yellow"></div>
+      <div class="terminal-dot green"></div>
+      <span class="terminal-title">lazyfire</span>
+    </div>
+    <img :src="withBase('/preview.gif')" alt="LazyFire Preview" class="preview-gif" />
+  </div>
+</div>
+
+<div class="section-divider"></div>
+
+## Interface
+
+<div class="interface-demo">
+  <div class="panel-layout">
+    <div class="panel" :class="{ active: true }">
+      <div class="panel-title">Projects</div>
+      <div class="panel-content">
+        <div class="panel-row selected">my-app-prod</div>
+        <div class="panel-row">my-app-staging</div>
+        <div class="panel-row">my-app-dev</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Collections</div>
+      <div class="panel-content">
+        <div class="panel-row">users</div>
+        <div class="panel-row selected">orders</div>
+        <div class="panel-row">products</div>
+        <div class="panel-row">analytics</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Tree</div>
+      <div class="panel-content">
+        <div class="panel-row">order_001</div>
+        <div class="panel-row selected">order_002</div>
+        <div class="panel-row dim">  items/</div>
+        <div class="panel-row">order_003</div>
+      </div>
+    </div>
+    <div class="panel wide">
+      <div class="panel-title">Details</div>
+      <div class="panel-content mono">
+        <div class="panel-row"><span class="json-key">"status"</span>: <span class="json-str">"shipped"</span>,</div>
+        <div class="panel-row"><span class="json-key">"total"</span>: <span class="json-num">149.99</span>,</div>
+        <div class="panel-row"><span class="json-key">"items"</span>: <span class="json-num">3</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="interface-hint">Four-panel layout with vim-style navigation</div>
+</div>
+
+<div class="section-divider"></div>
+
+## Why LazyFire?
 
 <div class="why-grid">
   <div class="why-card">
@@ -126,9 +189,11 @@ import { withBase } from 'vitepress'
   <div class="why-card">
     <img :src="withBase('/icons/sparkles.svg')" class="why-icon" alt="">
     <div class="why-title">Zero config</div>
-    <div class="why-desc">Uses your existing firebase login credentials. Install and run -- that's it.</div>
+    <div class="why-desc">Uses your existing firebase login credentials. Install and run - that's it.</div>
   </div>
 </div>
+
+<div class="section-divider"></div>
 
 ## Firebase Console vs LazyFire
 
@@ -144,6 +209,17 @@ import { withBase } from 'vitepress'
 | Copy document JSON | Select, copy, format | `c` key |
 | View function logs | Separate Cloud Logging page | `]` tab, same window |
 
+</div>
+
+<div class="section-divider"></div>
+
+<div class="cta-section">
+  <h2>Ready to try it?</h2>
+  <p class="cta-desc">Install LazyFire and start browsing your Firebase projects in seconds.</p>
+  <div class="cta-buttons">
+    <a :href="withBase('/guide/getting-started')" class="cta-btn primary">Get Started</a>
+    <a href="https://github.com/marjoballabani/lazyfire" class="cta-btn secondary">GitHub</a>
+  </div>
 </div>
 
 </div>
