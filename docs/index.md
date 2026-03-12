@@ -123,40 +123,66 @@ import { withBase } from 'vitepress'
 
 <div class="interface-demo">
   <div class="panel-layout">
-    <div class="panel" :class="{ active: true }">
-      <div class="panel-title">Projects</div>
-      <div class="panel-content">
-        <div class="panel-row selected">my-app-prod</div>
-        <div class="panel-row">my-app-staging</div>
-        <div class="panel-row">my-app-dev</div>
+    <div class="panel-left">
+      <div class="panel" :class="{ active: true }">
+        <div class="panel-title">Projects</div>
+        <div class="panel-content">
+          <div class="panel-row selected">my-app-prod</div>
+          <div class="panel-row">my-app-staging</div>
+          <div class="panel-row">my-app-dev</div>
+        </div>
+        <div class="panel-count">1 of 3</div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Collections <span class="panel-tab-inactive">Functions</span></div>
+        <div class="panel-content">
+          <div class="panel-row">Client</div>
+          <div class="panel-row">Order</div>
+          <div class="panel-row selected">Product</div>
+          <div class="panel-row">Retail</div>
+        </div>
+        <div class="panel-count">3 of 4</div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Tree</div>
+        <div class="panel-content">
+          <div class="panel-row selected">9crF4Fg1BpQJt...</div>
+          <div class="panel-row">XskAkUIJNmJwy...</div>
+          <div class="panel-row">toi6iaX11KC3qW...</div>
+        </div>
+        <div class="panel-count">1 of 3</div>
       </div>
     </div>
-    <div class="panel">
-      <div class="panel-title">Collections</div>
-      <div class="panel-content">
-        <div class="panel-row">users</div>
-        <div class="panel-row selected">orders</div>
-        <div class="panel-row">products</div>
-        <div class="panel-row">analytics</div>
+    <div class="panel-right">
+      <div class="panel details-panel">
+        <div class="panel-title">Details</div>
+        <div class="panel-stats">
+          <span class="stat green">Size: 369 B / 1MB</span>
+          <span class="stat yellow">Index: ~30+</span>
+          <span class="stat green">Depth: 1 / 20</span>
+        </div>
+        <div class="panel-content mono">
+          <div class="panel-row">{</div>
+          <div class="panel-row">  <span class="json-key">"brand"</span>: <span class="json-str">"Apple"</span>,</div>
+          <div class="panel-row">  <span class="json-key">"model"</span>: <span class="json-str">"XS max"</span>,</div>
+          <div class="panel-row">  <span class="json-key">"name"</span>: <span class="json-str">"Iphone"</span>,</div>
+          <div class="panel-row">  <span class="json-key">"price"</span>: <span class="json-str">"4"</span>,</div>
+          <div class="panel-row">  <span class="json-key">"enabled"</span>: <span class="json-bool">true</span>,</div>
+          <div class="panel-row">  <span class="json-key">"quantity"</span>: <span class="json-str">"0"</span></div>
+          <div class="panel-row">}</div>
+        </div>
+      </div>
+      <div class="panel commands-panel">
+        <div class="panel-title">Commands</div>
+        <div class="panel-content">
+          <div class="panel-row dim">cache Using cached 9crF4Fg1BpQJt...</div>
+        </div>
       </div>
     </div>
-    <div class="panel">
-      <div class="panel-title">Tree</div>
-      <div class="panel-content">
-        <div class="panel-row">order_001</div>
-        <div class="panel-row selected">order_002</div>
-        <div class="panel-row dim">  items/</div>
-        <div class="panel-row">order_003</div>
-      </div>
-    </div>
-    <div class="panel wide">
-      <div class="panel-title">Details</div>
-      <div class="panel-content mono">
-        <div class="panel-row"><span class="json-key">"status"</span>: <span class="json-str">"shipped"</span>,</div>
-        <div class="panel-row"><span class="json-key">"total"</span>: <span class="json-num">149.99</span>,</div>
-        <div class="panel-row"><span class="json-key">"items"</span>: <span class="json-num">3</span></div>
-      </div>
-    </div>
+  </div>
+  <div class="panel-statusbar">
+    <span class="status-keys"><span class="sk">h/l</span> cols  <span class="sk">j/k</span> move  <span class="sk">space</span> select  <span class="sk">c</span> copy  <span class="sk">/</span> filter  <span class="sk">F</span> query  <span class="sk">?</span> help  <span class="sk">q</span> quit</span>
+    <span class="status-version">v0.1.40</span>
   </div>
   <div class="interface-hint">Four-panel layout with vim-style navigation</div>
 </div>

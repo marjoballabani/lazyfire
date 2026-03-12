@@ -353,28 +353,44 @@
 
 /* Interface demo */
 .interface-demo {
-  max-width: 800px;
+  max-width: 900px;
   margin: 0 auto;
 }
 
 .panel-layout {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1.5fr;
+  grid-template-columns: 280px 1fr;
   gap: 2px;
   background: var(--lf-terminal-border);
-  border-radius: 12px;
+  border-radius: 12px 12px 0 0;
   overflow: hidden;
   border: 1px solid var(--lf-terminal-border);
+  border-bottom: none;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+}
+
+.panel-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.panel-right {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .panel {
   background: var(--lf-terminal-bg);
-  min-height: 160px;
 }
 
-.panel.wide {
-  min-width: 0;
+.details-panel {
+  flex: 1;
+}
+
+.commands-panel .panel-content {
+  padding: 6px 0;
 }
 
 .panel-title {
@@ -387,23 +403,51 @@
   border-bottom: 1px solid var(--lf-terminal-border);
 }
 
+.panel-tab-inactive {
+  opacity: 0.4;
+  margin-left: 8px;
+  text-transform: none;
+  font-weight: 400;
+}
+
 .panel.active .panel-title {
   color: var(--vp-c-brand-1);
   border-bottom-color: var(--vp-c-brand-1);
 }
 
 .panel-content {
-  padding: 8px 0;
+  padding: 4px 0;
 }
 
 .panel-content.mono {
-  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
   font-size: 0.78rem;
-  padding: 8px 12px;
+  padding: 4px 12px;
 }
 
+.panel-count {
+  padding: 2px 12px 6px;
+  font-size: 0.7rem;
+  color: #585b70;
+  text-align: right;
+}
+
+.panel-stats {
+  padding: 6px 12px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.72rem;
+  border-bottom: 1px solid var(--lf-terminal-border);
+}
+
+.stat.green { color: #a6e3a1; }
+.stat.yellow { color: #f9e2af; }
+.stat.red { color: #f38ba8; }
+
 .panel-row {
-  padding: 4px 12px;
+  padding: 3px 12px;
   font-size: 0.82rem;
   color: var(--lf-terminal-text);
   white-space: nowrap;
@@ -417,12 +461,44 @@
 }
 
 .panel-row.dim {
-  color: #6c7086;
+  color: #585b70;
+  font-size: 0.78rem;
 }
 
 .json-key { color: #89b4fa; }
 .json-str { color: #a6e3a1; }
 .json-num { color: #fab387; }
+.json-bool { color: #cba6f7; }
+
+/* Status bar */
+.panel-statusbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--lf-terminal-bg);
+  border: 1px solid var(--lf-terminal-border);
+  border-top: 2px solid var(--lf-terminal-border);
+  border-radius: 0 0 12px 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.72rem;
+  color: #585b70;
+}
+
+.status-keys {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sk {
+  color: #89b4fa;
+  font-weight: 500;
+}
+
+.status-version {
+  color: #585b70;
+}
 
 .interface-hint {
   text-align: center;
@@ -575,7 +651,7 @@
 /* Responsive */
 @media (max-width: 768px) {
   .panel-layout {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
   }
 
   .VPHero .name {
@@ -593,15 +669,19 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  .panel-stats {
+    gap: 8px;
+  }
 }
 
 @media (max-width: 480px) {
-  .panel-layout {
-    grid-template-columns: 1fr;
-  }
-
   .cta-buttons {
     flex-direction: column;
     align-items: center;
+  }
+
+  .panel-statusbar {
+    display: none;
   }
 }
