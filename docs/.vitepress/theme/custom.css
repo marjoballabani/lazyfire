@@ -553,8 +553,7 @@
 
 /* Comparison table */
 .comparison-table {
-  max-width: 860px;
-  margin: 0 auto;
+  width: 100%;
 }
 
 .comparison-table table {
