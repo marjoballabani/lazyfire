@@ -557,7 +557,8 @@
 }
 
 .comparison-table table {
-  width: 100%;
+  display: table !important;
+  width: 100% !important;
   table-layout: fixed;
   border-collapse: collapse;
   margin: 1.5rem 0 2rem;
