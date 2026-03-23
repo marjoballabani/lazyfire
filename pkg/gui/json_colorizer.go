@@ -2,6 +2,7 @@ package gui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
@@ -70,6 +71,36 @@ func colorizeLine(line string) string {
 	// For single lines, use the full colorizer
 	// Chroma handles partial JSON gracefully
 	return colorizeJSON(line)
+}
+
+// annotateTimestamps appends human-readable timestamp comments to colorized JSON.
+// rawJSON is used to detect timestamps; colorized is the ANSI-highlighted version.
+// Both must have the same number of lines.
+func annotateTimestamps(rawJSON, colorized string) string {
+	rawLines := strings.Split(rawJSON, "\n")
+	colorLines := strings.Split(colorized, "\n")
+
+	for i, rawLine := range rawLines {
+		if i >= len(colorLines) {
+			break
+		}
+		// Look for quoted ISO timestamp strings
+		if idx := strings.Index(rawLine, `"`); idx >= 0 {
+			rest := rawLine[idx+1:]
+			endIdx := strings.Index(rest, `"`)
+			if endIdx > 0 {
+				val := rest[:endIdx]
+				if t, err := time.Parse(time.RFC3339Nano, val); err == nil {
+					humanized := t.Local().Format("Jan 2, 2006 3:04:05 PM")
+					colorLines[i] = colorLines[i] + "  \033[90m// " + humanized + "\033[0m"
+				} else if t, err := time.Parse(time.RFC3339, val); err == nil {
+					humanized := t.Local().Format("Jan 2, 2006 3:04:05 PM")
+					colorLines[i] = colorLines[i] + "  \033[90m// " + humanized + "\033[0m"
+				}
+			}
+		}
+	}
+	return strings.Join(colorLines, "\n")
 }
 
 // Ensure styles package is used (prevents unused import)

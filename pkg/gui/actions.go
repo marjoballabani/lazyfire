@@ -1,12 +1,14 @@
 package gui
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 
@@ -43,6 +45,10 @@ func (g *Gui) doEscape() error {
 			target = "tree"
 		}
 		return g.setFocus(g.g, target)
+	}
+	// Storage: go back up folder/bucket hierarchy
+	if g.currentColumn == "collections" && g.collectionsTab == "storage" && (g.currentBucket != "" || g.storagePrefix != "") {
+		return g.doStorageBack()
 	}
 	// Exit select mode only when in tree panel
 	if g.selectMode && g.currentColumn == "tree" {
@@ -200,6 +206,61 @@ func (g *Gui) doColumnRight() error {
 	return g.setFocus(g.g, newColumn)
 }
 
+// doPageUp jumps up 10 items in current panel
+func (g *Gui) doPageUp() error {
+	switch g.currentColumn {
+	case "projects":
+		g.selectedProjectIndex -= 10
+		if g.selectedProjectIndex < 0 {
+			g.selectedProjectIndex = 0
+		}
+		g.currentProjectInfo = nil
+	case "collections":
+		g.pageUpCollections(10)
+	case "tree":
+		g.selectedTreeIdx -= 10
+		if g.selectedTreeIdx < 0 {
+			g.selectedTreeIdx = 0
+		}
+	case "details":
+		g.detailsScrollPos -= 10
+		if g.detailsScrollPos < 0 {
+			g.detailsScrollPos = 0
+		}
+	}
+	return g.Layout(g.g)
+}
+
+// doPageDown jumps down 10 items in current panel
+func (g *Gui) doPageDown() error {
+	switch g.currentColumn {
+	case "projects":
+		filtered := g.getFilteredProjects()
+		g.selectedProjectIndex += 10
+		if g.selectedProjectIndex >= len(filtered) {
+			g.selectedProjectIndex = len(filtered) - 1
+		}
+		if g.selectedProjectIndex < 0 {
+			g.selectedProjectIndex = 0
+		}
+		g.currentProjectInfo = nil
+	case "collections":
+		g.pageDownCollections(10)
+	case "tree":
+		filtered := g.getFilteredTreeNodes()
+		g.selectedTreeIdx += 10
+		if g.selectedTreeIdx >= len(filtered) {
+			g.selectedTreeIdx = len(filtered) - 1
+		}
+		if g.selectedTreeIdx < 0 {
+			g.selectedTreeIdx = 0
+		}
+	case "details":
+		g.detailsScrollPos += 10
+	}
+	return g.Layout(g.g)
+}
+
 // doCursorUp moves selection up in current panel
 func (g *Gui) doCursorUp() error {
 	switch g.currentColumn {
@@ -209,12 +270,27 @@ func (g *Gui) doCursorUp() error {
 			g.currentProjectInfo = nil
 		}
 	case "collections":
-		if g.collectionsTab == "functions" {
+		switch g.collectionsTab {
+		case "functions":
 			filtered := g.getFilteredFunctions()
 			if g.selectedFunctionIdx > 0 && g.selectedFunctionIdx < len(filtered) {
 				g.selectedFunctionIdx--
 			}
-		} else {
+		case "storage":
+			if g.currentBucket == "" {
+				if g.selectedBucketIdx > 0 {
+					g.selectedBucketIdx--
+				}
+			} else {
+				if g.selectedObjectIdx > 0 {
+					g.selectedObjectIdx--
+				}
+			}
+		case "auth":
+			if g.selectedAuthIdx > 0 {
+				g.selectedAuthIdx--
+			}
+		default:
 			if g.selectedCollectionIdx > 0 {
 				g.selectedCollectionIdx--
 			}
@@ -241,12 +317,27 @@ func (g *Gui) doCursorDown() error {
 			g.currentProjectInfo = nil
 		}
 	case "collections":
-		if g.collectionsTab == "functions" {
+		switch g.collectionsTab {
+		case "functions":
 			filtered := g.getFilteredFunctions()
 			if g.selectedFunctionIdx < len(filtered)-1 {
 				g.selectedFunctionIdx++
 			}
-		} else {
+		case "storage":
+			if g.currentBucket == "" {
+				if g.selectedBucketIdx < len(g.storageBuckets)-1 {
+					g.selectedBucketIdx++
+				}
+			} else {
+				if g.selectedObjectIdx < len(g.storageObjects)-1 {
+					g.selectedObjectIdx++
+				}
+			}
+		case "auth":
+			if g.selectedAuthIdx < len(g.authUsers)-1 {
+				g.selectedAuthIdx++
+			}
+		default:
 			filtered := g.getFilteredCollections()
 			if g.selectedCollectionIdx < len(filtered)-1 {
 				g.selectedCollectionIdx++
@@ -263,6 +354,126 @@ func (g *Gui) doCursorDown() error {
 	return g.Layout(g.g)
 }
 
+// doHalfPageDown scrolls details half a page down
+func (g *Gui) doHalfPageDown() error {
+	if g.currentColumn == "details" {
+		g.detailsScrollPos += 20
+	}
+	return g.Layout(g.g)
+}
+
+// doHalfPageUp scrolls details half a page up
+func (g *Gui) doHalfPageUp() error {
+	if g.currentColumn == "details" {
+		g.detailsScrollPos -= 20
+		if g.detailsScrollPos < 0 {
+			g.detailsScrollPos = 0
+		}
+	}
+	return g.Layout(g.g)
+}
+
+// doJumpToProjects focuses the projects panel
+func (g *Gui) doJumpToProjects() error {
+	if g.currentColumn == "details" {
+		return nil
+	}
+	return g.setFocus(g.g, "projects")
+}
+
+// doJumpToCollections focuses the collections panel
+func (g *Gui) doJumpToCollections() error {
+	if g.currentColumn == "details" {
+		return nil
+	}
+	return g.setFocus(g.g, "collections")
+}
+
+// doJumpToTree focuses the tree panel
+func (g *Gui) doJumpToTree() error {
+	if g.currentColumn == "details" {
+		return nil
+	}
+	return g.setFocus(g.g, "tree")
+}
+
+// doGoToTop jumps to the first item in current panel
+func (g *Gui) doGoToTop() error {
+	switch g.currentColumn {
+	case "projects":
+		g.selectedProjectIndex = 0
+		g.currentProjectInfo = nil
+	case "collections":
+		switch g.collectionsTab {
+		case "functions":
+			g.selectedFunctionIdx = 0
+		case "storage":
+			if g.currentBucket == "" {
+				g.selectedBucketIdx = 0
+			} else {
+				g.selectedObjectIdx = 0
+			}
+		case "auth":
+			g.selectedAuthIdx = 0
+		default:
+			g.selectedCollectionIdx = 0
+		}
+	case "tree":
+		g.selectedTreeIdx = 0
+	case "details":
+		g.detailsScrollPos = 0
+	}
+	return g.Layout(g.g)
+}
+
+// doGoToBottom jumps to the last item in current panel
+func (g *Gui) doGoToBottom() error {
+	switch g.currentColumn {
+	case "projects":
+		filtered := g.getFilteredProjects()
+		if len(filtered) > 0 {
+			g.selectedProjectIndex = len(filtered) - 1
+		}
+		g.currentProjectInfo = nil
+	case "collections":
+		switch g.collectionsTab {
+		case "functions":
+			filtered := g.getFilteredFunctions()
+			if len(filtered) > 0 {
+				g.selectedFunctionIdx = len(filtered) - 1
+			}
+		case "storage":
+			if g.currentBucket == "" {
+				if len(g.storageBuckets) > 0 {
+					g.selectedBucketIdx = len(g.storageBuckets) - 1
+				}
+			} else {
+				if len(g.storageObjects) > 0 {
+					g.selectedObjectIdx = len(g.storageObjects) - 1
+				}
+			}
+		case "auth":
+			if len(g.authUsers) > 0 {
+				g.selectedAuthIdx = len(g.authUsers) - 1
+			}
+		default:
+			filtered := g.getFilteredCollections()
+			if len(filtered) > 0 {
+				g.selectedCollectionIdx = len(filtered) - 1
+			}
+		}
+	case "tree":
+		filtered := g.getFilteredTreeNodes()
+		if len(filtered) > 0 {
+			g.selectedTreeIdx = len(filtered) - 1
+		}
+	case "details":
+		// Scroll to bottom - use a large number, layout will clamp
+		g.detailsScrollPos = 99999
+	}
+	return g.Layout(g.g)
+}
+
 // doNextColumn - Tab goes to details panel from any panel
 func (g *Gui) doNextColumn() error {
 	if g.currentColumn == "details" {
@@ -275,19 +486,43 @@ func (g *Gui) doNextColumn() error {
 // doSwitchTab switches tabs based on current panel ([ and ] keys)
 // Collections panel: switch Collections/Functions tabs
 // Details panel: switch Details/Logs tabs (only when Functions tab is active)
+// doSwitchTabNext cycles to next tab (] key)
+func (g *Gui) doSwitchTabNext() error {
+	return g.doSwitchTabDir(1)
+}
+
+// doSwitchTabPrev cycles to previous tab ([ key)
+func (g *Gui) doSwitchTabPrev() error {
+	return g.doSwitchTabDir(-1)
+}
+
 func (g *Gui) doSwitchTab() error {
+	return g.doSwitchTabDir(1)
+}
+
+func (g *Gui) doSwitchTabDir(dir int) error {
 	switch g.currentColumn {
 	case "collections":
-		// Switch Collections/Functions tabs (preserve state for both)
-		if g.collectionsTab == "collections" {
-			g.collectionsTab = "functions"
-			if len(g.functions) == 0 && g.currentProject != "" {
-				g.loadFunctions()
+		tabs := []string{"collections", "functions", "storage", "auth", "rules", "indexes"}
+		currentIdx := 0
+		for i, t := range tabs {
+			if t == g.collectionsTab {
+				currentIdx = i
+				break
 			}
-		} else {
-			g.collectionsTab = "collections"
+		}
+		next := (currentIdx + dir + len(tabs)) % len(tabs)
+		g.collectionsTab = tabs[next]
+
+		// Reset view scroll position when switching tabs
+		if v, err := g.g.View("collections"); err == nil {
+			v.SetOrigin(0, 0)
+		}
+
+		// Load data for the new tab if needed
+		switch g.collectionsTab {
+		case "collections":
 			g.stopLogsRefresh()
-			// Keep currentFunction and functionLogs - don't clear them
 			if len(g.collections) == 0 && g.currentProject != "" {
 				g.collectionsLoading = true
 				go func() {
@@ -305,6 +540,26 @@ func (g *Gui) doSwitchTab() error {
 						return nil
 					})
 				}()
+			}
+		case "functions":
+			if len(g.functions) == 0 && g.currentProject != "" {
+				g.loadFunctions()
+			}
+		case "storage":
+			if len(g.storageBuckets) == 0 && g.currentProject != "" {
+				g.loadStorageBuckets()
+			}
+		case "auth":
+			if len(g.authUsers) == 0 && g.currentProject != "" {
+				g.loadAuthUsers()
+			}
+		case "rules":
+			if g.firestoreRules == nil && g.currentProject != "" {
+				g.loadFirestoreRules()
+			}
+		case "indexes":
+			if g.firestoreIndexes == nil && g.currentProject != "" {
+				g.loadFirestoreIndexes()
 			}
 		}
 	case "details":
@@ -333,10 +588,14 @@ func (g *Gui) doSpace() error {
 	case "projects":
 		return g.selectProject(g.g)
 	case "collections":
-		if g.collectionsTab == "functions" {
+		switch g.collectionsTab {
+		case "functions":
 			return g.selectFunction(g.g)
+		case "storage":
+			return g.doSelectStorageItem()
+		default:
+			return g.selectCollection(g.g)
 		}
-		return g.selectCollection(g.g)
 	case "tree":
 		return g.selectTreeNode(g.g)
 	}
@@ -354,11 +613,18 @@ func (g *Gui) doEnter() error {
 	case "projects":
 		return g.fetchProjectDetails(g.g)
 	case "collections":
-		if g.collectionsTab == "functions" {
+		switch g.collectionsTab {
+		case "functions":
 			// Select function and go to details to see logs
 			if err := g.selectFunction(g.g); err != nil {
 				return err
 			}
+			g.previousColumn = g.currentColumn
+			return g.setFocus(g.g, "details")
+		case "storage":
+			return g.doSelectStorageItem()
+		case "auth":
+			// Go to details to view user info
 			g.previousColumn = g.currentColumn
 			return g.setFocus(g.g, "details")
 		}
@@ -393,9 +659,14 @@ func (g *Gui) doStartFilter() error {
 	case "projects":
 		g.projectsFilter = ""
 	case "collections":
-		if g.collectionsTab == "functions" {
+		switch g.collectionsTab {
+		case "functions":
 			g.functionsFilter = ""
-		} else {
+		case "storage":
+			g.storageFilter = ""
+		case "auth":
+			g.authFilter = ""
+		default:
 			g.collectionsFilter = ""
 		}
 	case "tree":
@@ -441,6 +712,170 @@ func (g *Gui) doCopyJSON() error {
 		return nil
 	}
 	return g.copyJSONAction()
+}
+
+// doClearCache clears all document and collection caches
+func (g *Gui) doClearCache() error {
+	docCount := len(g.docCache)
+	g.docCache = make(map[string]map[string]any)
+	g.statsCache = make(map[string]*firebase.DocStats)
+	g.collectionCache = make(map[string][]string)
+	g.compositeIndexCache = make(map[string]*bool)
+	g.clearDetailsCache()
+	g.logCommand("cache", fmt.Sprintf("Cleared %d cached documents", docCount), "success")
+	return g.Layout(g.g)
+}
+
+// doShowCacheStats shows cache statistics in the command log
+func (g *Gui) doShowCacheStats() error {
+	docCount := len(g.docCache)
+	collCount := len(g.collectionCache)
+	statsCount := len(g.statsCache)
+
+	// Estimate memory usage
+	totalDocs := 0
+	for _, paths := range g.collectionCache {
+		totalDocs += len(paths)
+	}
+
+	g.logCommand("cache",
+		fmt.Sprintf("Docs: %d cached, Collections: %d cached (%d paths), Stats: %d cached",
+			docCount, collCount, totalDocs, statsCount),
+		"success")
+	return g.Layout(g.g)
+}
+
+// doToggleTimestamps toggles human-readable timestamp annotations
+func (g *Gui) doToggleTimestamps() error {
+	g.humanizeTimestamps = !g.humanizeTimestamps
+	g.clearDetailsCache()
+	if g.humanizeTimestamps {
+		g.logCommand("view", "Timestamps humanized", "success")
+	} else {
+		g.logCommand("view", "Timestamps raw", "success")
+	}
+	return g.Layout(g.g)
+}
+
+// doExportCachedDocs exports all cached documents to a single JSON file
+func (g *Gui) doExportCachedDocs() error {
+	if len(g.docCache) == 0 {
+		g.logCommand("export", "No cached documents to export", "error")
+		return nil
+	}
+
+	data, err := json.MarshalIndent(g.docCache, "", "  ")
+	if err != nil {
+		g.logCommand("export", fmt.Sprintf("Failed: %v", err), "error")
+		return nil
+	}
+
+	home, _ := os.UserHomeDir()
+	projectName := g.currentProject
+	if projectName == "" {
+		projectName = "lazyfire"
+	}
+	filename := fmt.Sprintf("lazyfire-export_%s.json", projectName)
+	fullPath := filepath.Join(home, "Downloads", filename)
+
+	if err := os.WriteFile(fullPath, data, 0644); err != nil {
+		g.logCommand("export", fmt.Sprintf("Failed: %v", err), "error")
+		return nil
+	}
+
+	g.logCommand("export", fmt.Sprintf("Exported %d docs to %s", len(g.docCache), fullPath), "success")
+	return nil
+}
+
+// doToggleWrap toggles word wrap in the details panel
+func (g *Gui) doToggleWrap() error {
+	if g.currentColumn != "details" {
+		return nil
+	}
+	v, err := g.g.View("details")
+	if err != nil {
+		return nil
+	}
+	v.Wrap = !v.Wrap
+	if v.Wrap {
+		g.logCommand("view", "Word wrap on", "success")
+	} else {
+		g.logCommand("view", "Word wrap off", "success")
+	}
+	return g.Layout(g.g)
+}
+
+// doToggleCompactJSON toggles between compact and pretty JSON view
+func (g *Gui) doToggleCompactJSON() error {
+	if g.currentColumn != "details" || g.currentDocData == nil {
+		return nil
+	}
+	g.compactJSON = !g.compactJSON
+	g.clearDetailsCache()
+	if g.compactJSON {
+		g.logCommand("view", "Compact JSON", "success")
+	} else {
+		g.logCommand("view", "Pretty JSON", "success")
+	}
+	return g.Layout(g.g)
+}
+
+// doCollapseAll collapses all expanded tree nodes
+func (g *Gui) doCollapseAll() error {
+	if g.currentColumn != "tree" || len(g.treeNodes) == 0 {
+		return nil
+	}
+	// Remove all children - keep only depth-0 nodes
+	var topLevel []TreeNode
+	for _, node := range g.treeNodes {
+		if node.Depth == 0 {
+			node.Expanded = false
+			topLevel = append(topLevel, node)
+		}
+	}
+	g.treeNodes = topLevel
+	g.selectedTreeIdx = 0
+	g.expandedPaths = make(map[string]bool)
+	g.logCommand("tree", fmt.Sprintf("Collapsed all (%d nodes)", len(topLevel)), "success")
+	return g.Layout(g.g)
+}
+
+// doCopyPath copies the current document/node path to clipboard
+func (g *Gui) doCopyPath() error {
+	var path string
+	switch g.currentColumn {
+	case "tree":
+		filtered := g.getFilteredTreeNodes()
+		if g.selectedTreeIdx < len(filtered) {
+			path = filtered[g.selectedTreeIdx].Path
+		}
+	case "details":
+		path = g.currentDocPath
+	default:
+		return nil
+	}
+	if path == "" {
+		g.logCommand("path", "No path to copy", "error")
+		return nil
+	}
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbcopy")
+	case "linux":
+		cmd = exec.Command("xclip", "-selection", "clipboard")
+	default:
+		g.logCommand("path", "Clipboard not supported", "error")
+		return nil
+	}
+	cmd.Stdin = strings.NewReader(path)
+	if err := cmd.Run(); err != nil {
+		g.logCommand("path", fmt.Sprintf("Failed: %v", err), "error")
+		return nil
+	}
+	g.logCommand("path", fmt.Sprintf("Copied: %s", path), "success")
+	return nil
 }
 
 // doSaveJSON saves current document to file
@@ -1466,4 +1901,500 @@ func checkDocLimits(stats *firebase.DocStats, docPath string) (metrics []string,
 	}
 
 	return metrics, warnings
+}
+
+// --- Sprint 2 features ---
+
+// doFieldSizeBreakdown shows field-by-field size breakdown in details
+func (g *Gui) doFieldSizeBreakdown() error {
+	if g.currentColumn != "details" || g.currentDocData == nil {
+		return nil
+	}
+
+	type fieldSize struct {
+		name string
+		size int
+	}
+
+	var fields []fieldSize
+	for k, v := range g.currentDocData {
+		size := firestoreValueSize(v) + len(k) + 1
+		fields = append(fields, fieldSize{name: k, size: size})
+	}
+	sort.Slice(fields, func(i, j int) bool {
+		return fields[i].size > fields[j].size
+	})
+
+	var parts []string
+	for i, f := range fields {
+		if i >= 10 {
+			parts = append(parts, fmt.Sprintf("... +%d more", len(fields)-10))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", f.name, formatBytes(f.size)))
+	}
+
+	g.logCommand("breakdown", strings.Join(parts, ", "), "success")
+	return nil
+}
+
+// doFieldTypeAnalysis shows field type distribution across cached docs in current collection
+func (g *Gui) doFieldTypeAnalysis() error {
+	if g.currentCollection == "" {
+		g.logCommand("analysis", "No collection selected", "error")
+		return nil
+	}
+
+	// Gather all cached docs for the current collection
+	typeCounts := make(map[string]map[string]int) // field -> type -> count
+	docCount := 0
+
+	for path, data := range g.docCache {
+		if !strings.HasPrefix(path, g.currentCollection+"/") {
+			continue
+		}
+		// Only top-level collection docs (not subcollection docs)
+		parts := strings.Split(path, "/")
+		if len(parts) != 2 {
+			continue
+		}
+		docCount++
+		for k, v := range data {
+			if typeCounts[k] == nil {
+				typeCounts[k] = make(map[string]int)
+			}
+			typeCounts[k][inferType(v)]++
+		}
+	}
+
+	if docCount == 0 {
+		g.logCommand("analysis", "No cached docs for "+g.currentCollection, "error")
+		return nil
+	}
+
+	// Sort fields alphabetically
+	var fieldNames []string
+	for k := range typeCounts {
+		fieldNames = append(fieldNames, k)
+	}
+	sort.Strings(fieldNames)
+
+	var parts []string
+	for _, name := range fieldNames {
+		types := typeCounts[name]
+		var typeStrs []string
+		for t, c := range types {
+			if c == docCount {
+				typeStrs = append(typeStrs, t)
+			} else {
+				typeStrs = append(typeStrs, fmt.Sprintf("%s(%d)", t, c))
+			}
+		}
+		sort.Strings(typeStrs)
+		parts = append(parts, fmt.Sprintf("%s:%s", name, strings.Join(typeStrs, "/")))
+	}
+
+	summary := fmt.Sprintf("[%d docs] %s", docCount, strings.Join(parts, ", "))
+	if len(summary) > 200 {
+		summary = summary[:197] + "..."
+	}
+	g.logCommand("analysis", summary, "success")
+	return nil
+}
+
+// doNextSearchMatch scrolls to next filter match in details
+func (g *Gui) doNextSearchMatch() error {
+	if g.currentColumn != "details" {
+		return nil
+	}
+	filter := g.getDetailsFilter()
+	if filter == "" || strings.HasPrefix(filter, ".") {
+		return nil
+	}
+	if g.cachedDetailsLines == nil {
+		return nil
+	}
+
+	lowerFilter := strings.ToLower(filter)
+	startLine := g.detailsCursorLine + 1
+	for i := 0; i < len(g.cachedDetailsLines); i++ {
+		idx := (startLine + i) % len(g.cachedDetailsLines)
+		if strings.Contains(strings.ToLower(g.cachedDetailsLines[idx]), lowerFilter) {
+			g.detailsCursorLine = idx
+			g.detailsScrollPos = idx
+			return g.Layout(g.g)
+		}
+	}
+	g.logCommand("search", "No more matches", "error")
+	return nil
+}
+
+// doPrevSearchMatch scrolls to previous filter match in details
+func (g *Gui) doPrevSearchMatch() error {
+	if g.currentColumn != "details" {
+		return nil
+	}
+	filter := g.getDetailsFilter()
+	if filter == "" || strings.HasPrefix(filter, ".") {
+		return nil
+	}
+	if g.cachedDetailsLines == nil {
+		return nil
+	}
+
+	lowerFilter := strings.ToLower(filter)
+	startLine := g.detailsCursorLine - 1
+	if startLine < 0 {
+		startLine = len(g.cachedDetailsLines) - 1
+	}
+	for i := 0; i < len(g.cachedDetailsLines); i++ {
+		idx := (startLine - i + len(g.cachedDetailsLines)) % len(g.cachedDetailsLines)
+		if strings.Contains(strings.ToLower(g.cachedDetailsLines[idx]), lowerFilter) {
+			g.detailsCursorLine = idx
+			g.detailsScrollPos = idx
+			return g.Layout(g.g)
+		}
+	}
+	g.logCommand("search", "No more matches", "error")
+	return nil
+}
+
+// doCopyFieldValue copies the JSON value of the field at the current scroll position
+func (g *Gui) doCopyFieldValue() error {
+	if g.currentColumn != "details" || g.currentDocData == nil {
+		return nil
+	}
+	if g.cachedDetailsLines == nil || len(g.cachedDetailsLines) == 0 {
+		return nil
+	}
+
+	// Get the line at current scroll position
+	lineIdx := g.detailsScrollPos
+	if lineIdx >= len(g.cachedDetailsLines) {
+		lineIdx = len(g.cachedDetailsLines) - 1
+	}
+	if lineIdx < 0 {
+		lineIdx = 0
+	}
+
+	line := strings.TrimSpace(g.cachedDetailsLines[lineIdx])
+	if line == "" || line == "{" || line == "}" || line == "[" || line == "]" {
+		g.logCommand("copy", "No field value on this line", "error")
+		return nil
+	}
+
+	// Extract value after the colon (for key: value lines)
+	value := line
+	if colonIdx := strings.Index(line, ": "); colonIdx >= 0 {
+		value = strings.TrimSpace(line[colonIdx+2:])
+		value = strings.TrimSuffix(value, ",")
+	}
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbcopy")
+	case "linux":
+		cmd = exec.Command("xclip", "-selection", "clipboard")
+	default:
+		g.logCommand("copy", "Clipboard not supported", "error")
+		return nil
+	}
+	cmd.Stdin = strings.NewReader(value)
+	if err := cmd.Run(); err != nil {
+		g.logCommand("copy", fmt.Sprintf("Failed: %v", err), "error")
+		return nil
+	}
+
+	display := value
+	if len(display) > 60 {
+		display = display[:57] + "..."
+	}
+	g.logCommand("copy", fmt.Sprintf("Copied value: %s", display), "success")
+	return nil
+}
+
+// doFocusCommands focuses the command log panel
+func (g *Gui) doFocusCommands() error {
+	if g.modalOpen || g.helpOpen {
+		return nil
+	}
+	g.modalOpen = true
+	return g.Layout(g.g)
+}
+
+// doFastScrollDown scrolls details 5 lines down (J)
+func (g *Gui) doFastScrollDown() error {
+	if g.currentColumn == "details" {
+		g.detailsScrollPos += 5
+	}
+	return g.Layout(g.g)
+}
+
+// doFastScrollUp scrolls details 5 lines up (K)
+func (g *Gui) doFastScrollUp() error {
+	if g.currentColumn == "details" {
+		g.detailsScrollPos -= 5
+		if g.detailsScrollPos < 0 {
+			g.detailsScrollPos = 0
+		}
+	}
+	return g.Layout(g.g)
+}
+
+// doToggleLineNumbers toggles line numbers in details JSON view
+func (g *Gui) doToggleLineNumbers() error {
+	if g.currentColumn != "details" {
+		return nil
+	}
+	g.showLineNumbers = !g.showLineNumbers
+	g.clearDetailsCache()
+	if g.showLineNumbers {
+		g.logCommand("view", "Line numbers on", "success")
+	} else {
+		g.logCommand("view", "Line numbers off", "success")
+	}
+	return g.Layout(g.g)
+}
+
+// doCycleLogLevel cycles through log level filters for function logs
+func (g *Gui) doCycleLogLevel() error {
+	levels := []string{"", "ERROR", "WARNING", "INFO", "DEBUG"}
+	currentIdx := 0
+	for i, l := range levels {
+		if l == g.logLevelFilter {
+			currentIdx = i
+			break
+		}
+	}
+	g.logLevelFilter = levels[(currentIdx+1)%len(levels)]
+	g.clearDetailsCache()
+	if g.logLevelFilter == "" {
+		g.logCommand("logs", "Showing all log levels", "success")
+	} else {
+		g.logCommand("logs", fmt.Sprintf("Filter: %s only", g.logLevelFilter), "success")
+	}
+	return g.Layout(g.g)
+}
+
+// doCollectionMemoryEstimate shows estimated memory for current collection from cache
+func (g *Gui) doCollectionMemoryEstimate() error {
+	if g.currentCollection == "" {
+		g.logCommand("memory", "No collection selected", "error")
+		return nil
+	}
+
+	totalSize := 0
+	docCount := 0
+	for path := range g.docCache {
+		if !strings.HasPrefix(path, g.currentCollection+"/") {
+			continue
+		}
+		parts := strings.Split(path, "/")
+		if len(parts) != 2 {
+			continue
+		}
+		docCount++
+		if stats, ok := g.statsCache[path]; ok && stats != nil {
+			totalSize += stats.SizeBytes
+		} else {
+			// Estimate from JSON marshal
+			if data, err := json.Marshal(g.docCache[path]); err == nil {
+				totalSize += len(data)
+			}
+		}
+	}
+
+	if docCount == 0 {
+		g.logCommand("memory", "No cached docs for "+g.currentCollection, "error")
+		return nil
+	}
+
+	avg := totalSize / docCount
+	g.logCommand("memory",
+		fmt.Sprintf("%s: %d docs, total ~%s, avg ~%s/doc",
+			g.currentCollection, docCount, formatBytes(totalSize), formatBytes(avg)),
+		"success")
+	return nil
+}
+
+// doToggleBase64Decode toggles inline base64 decoding for string values
+func (g *Gui) doToggleBase64Decode() error {
+	if g.currentColumn != "details" || g.currentDocData == nil {
+		return nil
+	}
+	if g.cachedDetailsLines == nil || len(g.cachedDetailsLines) == 0 {
+		return nil
+	}
+
+	lineIdx := g.detailsScrollPos
+	if lineIdx >= len(g.cachedDetailsLines) {
+		lineIdx = len(g.cachedDetailsLines) - 1
+	}
+	if lineIdx < 0 {
+		lineIdx = 0
+	}
+
+	line := g.cachedDetailsLines[lineIdx]
+	// Try to find a base64-encoded string value
+	if idx := strings.Index(line, `": "`); idx >= 0 {
+		rest := line[idx+4:]
+		endIdx := strings.LastIndex(rest, `"`)
+		if endIdx > 0 {
+			val := rest[:endIdx]
+			decoded, err := base64.StdEncoding.DecodeString(val)
+			if err != nil {
+				decoded, err = base64.RawStdEncoding.DecodeString(val)
+			}
+			if err == nil && len(decoded) > 0 {
+				display := string(decoded)
+				if len(display) > 100 {
+					display = display[:97] + "..."
+				}
+				// Check if decoded content is printable
+				printable := true
+				for _, b := range decoded {
+					if b < 0x20 && b != '\n' && b != '\r' && b != '\t' {
+						printable = false
+						break
+					}
+				}
+				if printable {
+					g.logCommand("base64", fmt.Sprintf("Decoded: %s", display), "success")
+				} else {
+					g.logCommand("base64", fmt.Sprintf("Binary data, %d bytes", len(decoded)), "success")
+				}
+				return nil
+			}
+		}
+	}
+
+	g.logCommand("base64", "No base64 string found on this line", "error")
+	return nil
+}
+
+// pageUpCollections moves up N items in the collections panel based on current tab
+func (g *Gui) pageUpCollections(n int) {
+	switch g.collectionsTab {
+	case "functions":
+		g.selectedFunctionIdx -= n
+		if g.selectedFunctionIdx < 0 {
+			g.selectedFunctionIdx = 0
+		}
+	case "storage":
+		if g.currentBucket == "" {
+			g.selectedBucketIdx -= n
+			if g.selectedBucketIdx < 0 {
+				g.selectedBucketIdx = 0
+			}
+		} else {
+			g.selectedObjectIdx -= n
+			if g.selectedObjectIdx < 0 {
+				g.selectedObjectIdx = 0
+			}
+		}
+	case "auth":
+		g.selectedAuthIdx -= n
+		if g.selectedAuthIdx < 0 {
+			g.selectedAuthIdx = 0
+		}
+	default:
+		g.selectedCollectionIdx -= n
+		if g.selectedCollectionIdx < 0 {
+			g.selectedCollectionIdx = 0
+		}
+	}
+}
+
+// pageDownCollections moves down N items in the collections panel based on current tab
+func (g *Gui) pageDownCollections(n int) {
+	switch g.collectionsTab {
+	case "functions":
+		filtered := g.getFilteredFunctions()
+		g.selectedFunctionIdx += n
+		if g.selectedFunctionIdx >= len(filtered) {
+			g.selectedFunctionIdx = len(filtered) - 1
+		}
+		if g.selectedFunctionIdx < 0 {
+			g.selectedFunctionIdx = 0
+		}
+	case "storage":
+		if g.currentBucket == "" {
+			g.selectedBucketIdx += n
+			if g.selectedBucketIdx >= len(g.storageBuckets) {
+				g.selectedBucketIdx = len(g.storageBuckets) - 1
+			}
+			if g.selectedBucketIdx < 0 {
+				g.selectedBucketIdx = 0
+			}
+		} else {
+			g.selectedObjectIdx += n
+			if g.selectedObjectIdx >= len(g.storageObjects) {
+				g.selectedObjectIdx = len(g.storageObjects) - 1
+			}
+			if g.selectedObjectIdx < 0 {
+				g.selectedObjectIdx = 0
+			}
+		}
+	case "auth":
+		g.selectedAuthIdx += n
+		if g.selectedAuthIdx >= len(g.authUsers) {
+			g.selectedAuthIdx = len(g.authUsers) - 1
+		}
+		if g.selectedAuthIdx < 0 {
+			g.selectedAuthIdx = 0
+		}
+	default:
+		filtered := g.getFilteredCollections()
+		g.selectedCollectionIdx += n
+		if g.selectedCollectionIdx >= len(filtered) {
+			g.selectedCollectionIdx = len(filtered) - 1
+		}
+		if g.selectedCollectionIdx < 0 {
+			g.selectedCollectionIdx = 0
+		}
+	}
+}
+
+// doSelectStorageItem handles space/enter for storage tab
+func (g *Gui) doSelectStorageItem() error {
+	if g.currentBucket == "" {
+		// Select a bucket
+		if g.selectedBucketIdx < len(g.storageBuckets) {
+			g.currentBucket = g.storageBuckets[g.selectedBucketIdx].Name
+			g.storagePrefix = ""
+			g.storagePrefixStack = nil
+			g.loadStorageObjects()
+		}
+	} else {
+		// Navigate into folder or select object
+		if g.selectedObjectIdx < len(g.storageObjects) {
+			obj := g.storageObjects[g.selectedObjectIdx]
+			if obj.IsPrefix {
+				g.storagePrefixStack = append(g.storagePrefixStack, g.storagePrefix)
+				g.storagePrefix = obj.Name
+				g.loadStorageObjects()
+			}
+		}
+	}
+	return g.Layout(g.g)
+}
+
+// doStorageBack goes up one level in storage navigation (Esc or Backspace)
+func (g *Gui) doStorageBack() error {
+	if g.storagePrefix != "" {
+		// Go up one folder level
+		if len(g.storagePrefixStack) > 0 {
+			g.storagePrefix = g.storagePrefixStack[len(g.storagePrefixStack)-1]
+			g.storagePrefixStack = g.storagePrefixStack[:len(g.storagePrefixStack)-1]
+		} else {
+			g.storagePrefix = ""
+		}
+		g.loadStorageObjects()
+	} else if g.currentBucket != "" {
+		// Go back to bucket list
+		g.currentBucket = ""
+		g.storageObjects = nil
+	}
+	return g.Layout(g.g)
 }

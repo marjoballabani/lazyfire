@@ -58,8 +58,8 @@ type Gui struct {
 	selectedCollectionIdx int
 	currentCollection     string
 
-	// Collections/Functions tab state
-	collectionsTab      string // "collections" or "functions"
+	// Collections/Functions/Storage/Auth tab state
+	collectionsTab      string // "collections", "functions", "storage", "auth", "rules", "indexes"
 	functions           []firebase.CloudFunction
 	selectedFunctionIdx int
 	functionsFilter     string
@@ -68,6 +68,31 @@ type Gui struct {
 	functionsLoading    bool
 	logsLoading         bool
 	logsRefreshTicker   *time.Ticker
+
+	// Storage state
+	storageBuckets       []firebase.StorageBucket
+	storageObjects       []firebase.StorageObject
+	selectedBucketIdx    int
+	selectedObjectIdx    int
+	currentBucket        string
+	storagePrefix        string // current "folder" prefix
+	storagePrefixStack   []string // stack for navigating back
+	storageLoading       bool
+	storageFilter        string
+
+	// Auth state
+	authUsers            []firebase.AuthUser
+	selectedAuthIdx      int
+	authLoading          bool
+	authFilter           string
+
+	// Rules state
+	firestoreRules       *firebase.FirestoreRules
+	rulesLoading         bool
+
+	// Indexes state
+	firestoreIndexes     []firebase.FirestoreIndex
+	indexesLoading       bool
 
 	// Tree state
 	treeNodes       []TreeNode
@@ -97,6 +122,13 @@ type Gui struct {
 	currentProjectInfo *firebase.ProjectDetails
 	detailsScrollPos   int
 	detailsTab         string // "details" or "logs"
+
+	// Display mode
+	compactJSON        bool // Toggle between compact and pretty JSON
+	humanizeTimestamps bool // Format Firestore timestamps in human-readable form
+	showLineNumbers    bool // Show line numbers in JSON view
+	detailsCursorLine  int  // Cursor line in details for field operations
+	logLevelFilter     string // Filter function logs by severity (e.g., "ERROR")
 
 	// Cached rendered content (avoid re-rendering on every Layout)
 	cachedDetailsContent string
@@ -408,7 +440,7 @@ func (g *Gui) getLoadingText(text string) string {
 
 // isAnyLoading returns true if any panel is currently loading
 func (g *Gui) isAnyLoading() bool {
-	return g.isLoading || g.collectionsLoading || g.treeLoading || g.detailsLoading || g.functionsLoading || g.logsLoading
+	return g.isLoading || g.collectionsLoading || g.treeLoading || g.detailsLoading || g.functionsLoading || g.logsLoading || g.storageLoading || g.authLoading || g.rulesLoading || g.indexesLoading
 }
 
 // loadFunctions loads Cloud Functions for the current project
@@ -469,4 +501,100 @@ func (g *Gui) stopLogsRefresh() {
 		g.logsRefreshTicker.Stop()
 		g.logsRefreshTicker = nil
 	}
+}
+
+// loadStorageBuckets loads Cloud Storage buckets for the current project
+func (g *Gui) loadStorageBuckets() {
+	g.storageLoading = true
+	go func() {
+		buckets, err := g.firebaseClient.ListBuckets()
+		g.g.Update(func(gui *gocui.Gui) error {
+			g.storageLoading = false
+			if err != nil {
+				g.logCommand("storage", fmt.Sprintf("Error: %v", err), "error")
+				return nil
+			}
+			g.storageBuckets = buckets
+			g.selectedBucketIdx = 0
+			g.logCommand("storage", fmt.Sprintf("Loaded %d buckets", len(buckets)), "success")
+			return nil
+		})
+	}()
+}
+
+// loadStorageObjects loads objects in a bucket with the current prefix
+func (g *Gui) loadStorageObjects() {
+	if g.currentBucket == "" {
+		return
+	}
+	g.storageLoading = true
+	go func() {
+		objects, err := g.firebaseClient.ListObjects(g.currentBucket, g.storagePrefix, 100)
+		g.g.Update(func(gui *gocui.Gui) error {
+			g.storageLoading = false
+			if err != nil {
+				g.logCommand("storage", fmt.Sprintf("Error: %v", err), "error")
+				return nil
+			}
+			g.storageObjects = objects
+			g.selectedObjectIdx = 0
+			g.logCommand("storage", fmt.Sprintf("Listed %d items in %s", len(objects), g.currentBucket), "success")
+			return nil
+		})
+	}()
+}
+
+// loadAuthUsers loads Firebase Auth users
+func (g *Gui) loadAuthUsers() {
+	g.authLoading = true
+	go func() {
+		users, err := g.firebaseClient.ListAuthUsers(100)
+		g.g.Update(func(gui *gocui.Gui) error {
+			g.authLoading = false
+			if err != nil {
+				g.logCommand("auth", fmt.Sprintf("Error: %v", err), "error")
+				return nil
+			}
+			g.authUsers = users
+			g.selectedAuthIdx = 0
+			g.logCommand("auth", fmt.Sprintf("Loaded %d users", len(users)), "success")
+			return nil
+		})
+	}()
+}
+
+// loadFirestoreRules loads current Firestore security rules
+func (g *Gui) loadFirestoreRules() {
+	g.rulesLoading = true
+	go func() {
+		rules, err := g.firebaseClient.GetFirestoreRules()
+		g.g.Update(func(gui *gocui.Gui) error {
+			g.rulesLoading = false
+			if err != nil {
+				g.logCommand("rules", fmt.Sprintf("Error: %v", err), "error")
+				return nil
+			}
+			g.firestoreRules = rules
+			g.logCommand("rules", "Loaded Firestore rules", "success")
+			return nil
+		})
+	}()
+}
+
+// loadFirestoreIndexes loads Firestore composite indexes
+func (g *Gui) loadFirestoreIndexes() {
+	g.indexesLoading = true
+	go func() {
+		indexes, err := g.firebaseClient.ListFirestoreIndexes()
+		g.g.Update(func(gui *gocui.Gui) error {
+			g.indexesLoading = false
+			if err != nil {
+				g.logCommand("indexes", fmt.Sprintf("Error: %v", err), "error")
+				return nil
+			}
+			g.firestoreIndexes = indexes
+			g.logCommand("indexes", fmt.Sprintf("Loaded %d composite indexes", len(indexes)), "success")
+			return nil
+		})
+	}()
 }

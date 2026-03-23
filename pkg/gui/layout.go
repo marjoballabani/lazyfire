@@ -152,10 +152,39 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 			v.FrameColor = g.theme.InactiveBorderColor
 		}
 
-		// Use gocui's built-in Tabs feature for proper rendering
-		v.Tabs = []string{icons.COLLECTION_ICON + " Collections", "⚡ Functions"}
-		if g.collectionsTab == "functions" {
-			v.TabIndex = 1
+		// Sliding window of 3 tabs using gocui's built-in tab rendering
+		allTabs := []string{"Collections", "Functions", "Storage", "Auth", "Rules", "Indexes"}
+		allKeys := []string{"collections", "functions", "storage", "auth", "rules", "indexes"}
+		activeIdx := 0
+		for i, k := range allKeys {
+			if k == g.collectionsTab {
+				activeIdx = i
+				break
+			}
+		}
+		start := activeIdx - 1
+		if start < 0 {
+			start = 0
+		}
+		if start+3 > len(allTabs) {
+			start = len(allTabs) - 3
+		}
+		windowTabs := make([]string, 3)
+		for i := 0; i < 3; i++ {
+			name := allTabs[start+i]
+			if start > 0 && i == 0 {
+				name = "< " + name
+			}
+			if start+3 < len(allTabs) && i == 2 {
+				name = name + " >"
+			}
+			windowTabs[i] = name
+		}
+		v.Tabs = windowTabs
+		v.TabIndex = activeIdx - start
+
+		switch g.collectionsTab {
+		case "functions":
 			filtered := g.getFilteredFunctions()
 			hasFilter := hasCommittedFilter || isTypingFilter
 			if hasFilter {
@@ -165,8 +194,39 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 			} else {
 				v.Footer = "0 of 0"
 			}
-		} else {
-			v.TabIndex = 0
+		case "storage":
+			if g.currentBucket == "" {
+				if len(g.storageBuckets) > 0 {
+					v.Footer = fmt.Sprintf("%d of %d", g.selectedBucketIdx+1, len(g.storageBuckets))
+				} else {
+					v.Footer = "0 of 0"
+				}
+			} else {
+				if len(g.storageObjects) > 0 {
+					v.Footer = fmt.Sprintf("%d of %d", g.selectedObjectIdx+1, len(g.storageObjects))
+				} else {
+					v.Footer = "0 of 0"
+				}
+			}
+		case "auth":
+			if len(g.authUsers) > 0 {
+				v.Footer = fmt.Sprintf("%d of %d", g.selectedAuthIdx+1, len(g.authUsers))
+			} else {
+				v.Footer = "0 of 0"
+			}
+		case "rules":
+			if g.firestoreRules != nil {
+				v.Footer = "loaded"
+			} else {
+				v.Footer = ""
+			}
+		case "indexes":
+			if len(g.firestoreIndexes) > 0 {
+				v.Footer = fmt.Sprintf("%d indexes", len(g.firestoreIndexes))
+			} else {
+				v.Footer = "0 indexes"
+			}
+		default: // collections
 			filtered := g.getFilteredCollections()
 			hasFilter := hasCommittedFilter || isTypingFilter
 			if hasFilter {
@@ -270,16 +330,15 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 			v.FrameColor = g.theme.InactiveBorderColor
 		}
 
-		// Show tabs when Functions tab is active AND came from Collections panel
+		// Show active tab in title when Functions tab is active
 		if g.collectionsTab == "functions" && (g.currentColumn == "collections" || (g.currentColumn == "details" && g.previousColumn == "collections")) {
-			v.Tabs = []string{icons.DETAILS_ICON + " Details", "📋 Logs"}
+			v.Tabs = nil
 			if g.detailsTab == "logs" {
-				v.TabIndex = 1
+				v.Title = " Logs [/] "
 			} else {
-				v.TabIndex = 0
+				v.Title = " Details [/] "
 			}
 		} else {
-			// No tabs when not in Functions context
 			v.Tabs = nil
 			// Only reset detailsTab when on Tree or Projects (not when switching to Collections tab)
 			if g.currentColumn == "tree" || g.currentColumn == "projects" {
@@ -618,13 +677,23 @@ func (g *Gui) updateProjectsView(v *gocui.View) {
 	}
 }
 
+
 func (g *Gui) updateCollectionsView(v *gocui.View) {
 	v.Clear()
 
-	// Show content based on active tab (title is set in Layout)
-	if g.collectionsTab == "functions" {
+	// Show content based on active tab
+	switch g.collectionsTab {
+	case "functions":
 		g.renderFunctionsContent(v)
-	} else {
+	case "storage":
+		g.renderStorageContent(v)
+	case "auth":
+		g.renderAuthContent(v)
+	case "rules":
+		g.renderRulesContent(v)
+	case "indexes":
+		g.renderIndexesContent(v)
+	default:
 		g.renderCollectionsContent(v)
 	}
 }
@@ -651,10 +720,15 @@ func (g *Gui) renderCollectionsContent(v *gocui.View) {
 		if icon != "" {
 			icon = "\033[36m" + icon + "\033[0m " // Cyan folder icon
 		}
+		// Show cached doc count if available
+		countStr := ""
+		if cachedPaths, ok := g.collectionCache[col.Path]; ok {
+			countStr = fmt.Sprintf(" \033[90m(%d)\033[0m", len(cachedPaths))
+		}
 		if col.Name == g.currentCollection {
-			fmt.Fprintf(v, "%s*\033[0m %s%s\n", g.getActiveColorCode(), icon, col.Name)
+			fmt.Fprintf(v, "%s*\033[0m %s%s%s\n", g.getActiveColorCode(), icon, col.Name, countStr)
 		} else {
-			fmt.Fprintf(v, "  %s%s\n", icon, col.Name)
+			fmt.Fprintf(v, "  %s%s%s\n", icon, col.Name, countStr)
 		}
 	}
 
@@ -725,6 +799,196 @@ func (g *Gui) renderFunctionsContent(v *gocui.View) {
 			g.selectedFunctionIdx = len(filtered) - 1
 		}
 		v.FocusPoint(0, g.selectedFunctionIdx, true)
+	}
+}
+
+func (g *Gui) renderStorageContent(v *gocui.View) {
+	if g.storageLoading {
+		v.Highlight = false
+		fmt.Fprint(v, g.getLoadingText("Loading storage..."))
+		return
+	}
+
+	isFocused := g.currentColumn == "collections"
+	dimColor := "\033[90m"
+	resetColor := "\033[0m"
+	activeColor := g.getActiveColorCode()
+
+	if g.currentBucket == "" {
+		// Show bucket list
+		v.Highlight = isFocused && len(g.storageBuckets) > 0
+		if len(g.storageBuckets) == 0 {
+			fmt.Fprintf(v, "%sNo storage buckets found%s", dimColor, resetColor)
+			return
+		}
+		for i, b := range g.storageBuckets {
+			marker := "  "
+			if i == g.selectedBucketIdx {
+				marker = activeColor + "* " + resetColor
+			}
+			fmt.Fprintf(v, "%s📦 %s %s(%s, %s)%s\n", marker, b.Name, dimColor, b.Location, b.StorageClass, resetColor)
+		}
+		if len(g.storageBuckets) > 0 {
+			if g.selectedBucketIdx >= len(g.storageBuckets) {
+				g.selectedBucketIdx = len(g.storageBuckets) - 1
+			}
+			v.FocusPoint(0, g.selectedBucketIdx, true)
+		}
+	} else {
+		// Show objects in current bucket/prefix
+		v.Highlight = isFocused && len(g.storageObjects) > 0
+		if len(g.storageObjects) == 0 {
+			fmt.Fprintf(v, "%sEmpty%s", dimColor, resetColor)
+			return
+		}
+		for i, o := range g.storageObjects {
+			marker := "  "
+			if i == g.selectedObjectIdx {
+				marker = activeColor + "* " + resetColor
+			}
+			if o.IsPrefix {
+				fmt.Fprintf(v, "%s📁 %s/\n", marker, o.DisplayName)
+			} else {
+				sizeStr := formatBytes(int(o.Size))
+				fmt.Fprintf(v, "%s📄 %s %s(%s, %s)%s\n", marker, o.DisplayName, dimColor, sizeStr, o.ContentType, resetColor)
+			}
+		}
+		if len(g.storageObjects) > 0 {
+			if g.selectedObjectIdx >= len(g.storageObjects) {
+				g.selectedObjectIdx = len(g.storageObjects) - 1
+			}
+			v.FocusPoint(0, g.selectedObjectIdx, true)
+		}
+	}
+}
+
+func (g *Gui) renderAuthContent(v *gocui.View) {
+	if g.authLoading {
+		v.Highlight = false
+		fmt.Fprint(v, g.getLoadingText("Loading users..."))
+		return
+	}
+
+	isFocused := g.currentColumn == "collections"
+	dimColor := "\033[90m"
+	resetColor := "\033[0m"
+	activeColor := g.getActiveColorCode()
+
+	v.Highlight = isFocused && len(g.authUsers) > 0
+	if len(g.authUsers) == 0 {
+		fmt.Fprintf(v, "%sNo users found%s", dimColor, resetColor)
+		return
+	}
+
+	for i, u := range g.authUsers {
+		marker := "  "
+		if i == g.selectedAuthIdx {
+			marker = activeColor + "* " + resetColor
+		}
+		name := u.Email
+		if name == "" {
+			name = u.UID
+		}
+		status := ""
+		if u.Disabled {
+			status = " \033[31m[disabled]\033[0m"
+		}
+		providers := ""
+		if len(u.Providers) > 0 {
+			providers = fmt.Sprintf(" %s(%s)%s", dimColor, strings.Join(u.Providers, ", "), resetColor)
+		}
+		fmt.Fprintf(v, "%s👤 %s%s%s\n", marker, name, status, providers)
+	}
+
+	if len(g.authUsers) > 0 {
+		if g.selectedAuthIdx >= len(g.authUsers) {
+			g.selectedAuthIdx = len(g.authUsers) - 1
+		}
+		v.FocusPoint(0, g.selectedAuthIdx, true)
+	}
+}
+
+func (g *Gui) renderRulesContent(v *gocui.View) {
+	if g.rulesLoading {
+		v.Highlight = false
+		fmt.Fprint(v, g.getLoadingText("Loading rules..."))
+		return
+	}
+
+	v.Highlight = false
+	dimColor := "\033[90m"
+	resetColor := "\033[0m"
+	cyanColor := "\033[36m"
+
+	if g.firestoreRules == nil {
+		fmt.Fprintf(v, "%sNo rules loaded%s", dimColor, resetColor)
+		return
+	}
+
+	if g.firestoreRules.UpdatedAt != "" {
+		fmt.Fprintf(v, "%sLast deployed: %s%s\n\n", dimColor, g.firestoreRules.UpdatedAt, resetColor)
+	}
+
+	// Syntax highlight the rules
+	for _, line := range strings.Split(g.firestoreRules.Rules, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "//") {
+			fmt.Fprintf(v, "%s%s%s\n", dimColor, line, resetColor)
+		} else if strings.HasPrefix(trimmed, "rules_version") || strings.HasPrefix(trimmed, "service") {
+			fmt.Fprintf(v, "%s%s%s\n", cyanColor, line, resetColor)
+		} else if strings.Contains(trimmed, "allow") {
+			fmt.Fprintf(v, "\033[33m%s%s\n", line, resetColor)
+		} else if strings.Contains(trimmed, "match") {
+			fmt.Fprintf(v, "\033[32m%s%s\n", line, resetColor)
+		} else {
+			fmt.Fprintf(v, "%s\n", line)
+		}
+	}
+}
+
+func (g *Gui) renderIndexesContent(v *gocui.View) {
+	if g.indexesLoading {
+		v.Highlight = false
+		fmt.Fprint(v, g.getLoadingText("Loading indexes..."))
+		return
+	}
+
+	dimColor := "\033[90m"
+	resetColor := "\033[0m"
+	cyanColor := "\033[36m"
+	greenColor := "\033[32m"
+	yellowColor := "\033[33m"
+
+	v.Highlight = false
+	if len(g.firestoreIndexes) == 0 {
+		fmt.Fprintf(v, "%sNo composite indexes found%s", dimColor, resetColor)
+		return
+	}
+
+	for i, idx := range g.firestoreIndexes {
+		// State color
+		stateColor := greenColor
+		if idx.State == "CREATING" {
+			stateColor = yellowColor
+		} else if idx.State == "NEEDS_REPAIR" {
+			stateColor = "\033[31m"
+		}
+
+		// Collection group header
+		fmt.Fprintf(v, "%s%d.%s %s%s%s %s[%s]%s %s(%s)%s\n",
+			cyanColor, i+1, resetColor,
+			"", idx.CollectionGroup, "",
+			stateColor, idx.State, resetColor,
+			dimColor, idx.QueryScope, resetColor)
+
+		// Fields
+		for _, f := range idx.Fields {
+			order := f.Order
+			if order == "" {
+				order = "AUTO"
+			}
+			fmt.Fprintf(v, "   %s%s%s %s\n", dimColor, f.FieldPath, resetColor, order)
+		}
 	}
 }
 
@@ -822,8 +1086,17 @@ func (g *Gui) renderFunctionLogs(v *gocui.View) {
 		return
 	}
 
+	// Show active log level filter
+	if g.logLevelFilter != "" {
+		fmt.Fprintf(v, "%sFilter: %s%s\n\n", yellowColor, g.logLevelFilter, resetColor)
+	}
+
 	// Render logs (newest first based on API response)
 	for _, log := range g.functionLogs {
+		// Apply log level filter
+		if g.logLevelFilter != "" && log.Severity != g.logLevelFilter {
+			continue
+		}
 		// Severity color
 		severityColor := dimColor
 		switch log.Severity {
@@ -843,6 +1116,108 @@ func (g *Gui) renderFunctionLogs(v *gocui.View) {
 			severityColor, log.Severity, resetColor,
 			log.Message)
 	}
+}
+
+func (g *Gui) renderStorageDetails(v *gocui.View) {
+	dimColor := "\033[90m"
+	resetColor := "\033[0m"
+	cyanColor := "\033[36m"
+
+	if g.currentBucket == "" {
+		// Show bucket details
+		if len(g.storageBuckets) == 0 || g.selectedBucketIdx >= len(g.storageBuckets) {
+			fmt.Fprintf(v, "%sSelect a bucket to view details%s", dimColor, resetColor)
+			return
+		}
+		b := g.storageBuckets[g.selectedBucketIdx]
+		fmt.Fprintf(v, "%s─── Bucket Details ───%s\n\n", cyanColor, resetColor)
+		fmt.Fprintf(v, " %sName:%s         %s\n", dimColor, resetColor, b.Name)
+		fmt.Fprintf(v, " %sLocation:%s     %s\n", dimColor, resetColor, b.Location)
+		fmt.Fprintf(v, " %sClass:%s        %s\n", dimColor, resetColor, b.StorageClass)
+		fmt.Fprintf(v, " %sCreated:%s      %s\n", dimColor, resetColor, b.TimeCreated)
+	} else {
+		// Show object details
+		if len(g.storageObjects) == 0 || g.selectedObjectIdx >= len(g.storageObjects) {
+			fmt.Fprintf(v, "%sNo object selected%s", dimColor, resetColor)
+			return
+		}
+		o := g.storageObjects[g.selectedObjectIdx]
+		fmt.Fprintf(v, "%s─── Object Details ───%s\n\n", cyanColor, resetColor)
+		fmt.Fprintf(v, " %sName:%s         %s\n", dimColor, resetColor, o.Name)
+		if o.IsPrefix {
+			fmt.Fprintf(v, " %sType:%s         folder\n", dimColor, resetColor)
+		} else {
+			fmt.Fprintf(v, " %sSize:%s         %s\n", dimColor, resetColor, formatBytes(int(o.Size)))
+			fmt.Fprintf(v, " %sType:%s         %s\n", dimColor, resetColor, o.ContentType)
+			fmt.Fprintf(v, " %sCreated:%s      %s\n", dimColor, resetColor, o.TimeCreated)
+			fmt.Fprintf(v, " %sUpdated:%s      %s\n", dimColor, resetColor, o.Updated)
+		}
+		fmt.Fprintf(v, "\n %sBucket:%s       %s\n", dimColor, resetColor, g.currentBucket)
+		if g.storagePrefix != "" {
+			fmt.Fprintf(v, " %sPrefix:%s       %s\n", dimColor, resetColor, g.storagePrefix)
+		}
+	}
+}
+
+func (g *Gui) renderAuthDetails(v *gocui.View) {
+	dimColor := "\033[90m"
+	resetColor := "\033[0m"
+	cyanColor := "\033[36m"
+
+	if len(g.authUsers) == 0 || g.selectedAuthIdx >= len(g.authUsers) {
+		fmt.Fprintf(v, "%sSelect a user to view details%s", dimColor, resetColor)
+		return
+	}
+
+	u := g.authUsers[g.selectedAuthIdx]
+	fmt.Fprintf(v, "%s─── User Details ───%s\n\n", cyanColor, resetColor)
+	fmt.Fprintf(v, " %sUID:%s           %s\n", dimColor, resetColor, u.UID)
+	if u.Email != "" {
+		fmt.Fprintf(v, " %sEmail:%s         %s\n", dimColor, resetColor, u.Email)
+	}
+	if u.DisplayName != "" {
+		fmt.Fprintf(v, " %sName:%s          %s\n", dimColor, resetColor, u.DisplayName)
+	}
+	fmt.Fprintf(v, " %sVerified:%s      %v\n", dimColor, resetColor, u.EmailVerified)
+	fmt.Fprintf(v, " %sDisabled:%s      %v\n", dimColor, resetColor, u.Disabled)
+	if u.CreatedAt != "" {
+		fmt.Fprintf(v, " %sCreated:%s       %s\n", dimColor, resetColor, u.CreatedAt)
+	}
+	if u.LastSignIn != "" {
+		fmt.Fprintf(v, " %sLast Sign-In:%s  %s\n", dimColor, resetColor, u.LastSignIn)
+	}
+	if len(u.Providers) > 0 {
+		fmt.Fprintf(v, " %sProviders:%s     %s\n", dimColor, resetColor, strings.Join(u.Providers, ", "))
+	}
+	if u.PhotoURL != "" {
+		fmt.Fprintf(v, " %sPhoto URL:%s     %s\n", dimColor, resetColor, u.PhotoURL)
+	}
+}
+
+func (g *Gui) renderRulesDetails(v *gocui.View) {
+	dimColor := "\033[90m"
+	resetColor := "\033[0m"
+	cyanColor := "\033[36m"
+
+	fmt.Fprintf(v, "%s─── Firestore Security Rules ───%s\n\n", cyanColor, resetColor)
+	if g.firestoreRules == nil {
+		fmt.Fprintf(v, "%sNo rules loaded. Switch to Rules tab to load.%s", dimColor, resetColor)
+		return
+	}
+	fmt.Fprintf(v, "%s%s%s", dimColor, "Rules are shown in the Rules tab panel.", resetColor)
+}
+
+func (g *Gui) renderIndexesDetails(v *gocui.View) {
+	dimColor := "\033[90m"
+	resetColor := "\033[0m"
+	cyanColor := "\033[36m"
+
+	fmt.Fprintf(v, "%s─── Composite Indexes ───%s\n\n", cyanColor, resetColor)
+	if len(g.firestoreIndexes) == 0 {
+		fmt.Fprintf(v, "%sNo composite indexes. Switch to Indexes tab to load.%s", dimColor, resetColor)
+		return
+	}
+	fmt.Fprintf(v, "%s%d composite indexes loaded. View in Indexes tab.%s", dimColor, len(g.firestoreIndexes), resetColor)
 }
 
 func (g *Gui) updateTreeView(v *gocui.View) {
@@ -865,8 +1240,29 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 	}
 
 	for i, node := range filtered {
-		// Build indentation
-		indent := strings.Repeat("  ", node.Depth)
+		// Build indentation with visual guides
+		var indent string
+		if node.Depth > 0 {
+			// Build guide lines: use │ for each depth level except the last
+			for d := 0; d < node.Depth-1; d++ {
+				// Check if there's a sibling at this depth below
+				hasMoreAtDepth := false
+				for j := i + 1; j < len(filtered); j++ {
+					if filtered[j].Depth <= d {
+						break
+					}
+					if filtered[j].Depth == d+1 {
+						hasMoreAtDepth = true
+						break
+					}
+				}
+				if hasMoreAtDepth {
+					indent += "\033[90m│\033[0m "
+				} else {
+					indent += "  "
+				}
+			}
+		}
 
 		// Arrow and icon based on type and expanded state
 		arrow := ""
@@ -893,10 +1289,25 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 			icon = icon + " "
 		}
 
-		// Tree connector
+		// Tree connector with proper guide character
 		connector := ""
 		if node.Depth > 0 {
-			connector = "└─"
+			// Check if there's a sibling after this node at the same depth
+			hasMoreSiblings := false
+			for j := i + 1; j < len(filtered); j++ {
+				if filtered[j].Depth < node.Depth {
+					break
+				}
+				if filtered[j].Depth == node.Depth {
+					hasMoreSiblings = true
+					break
+				}
+			}
+			if hasMoreSiblings {
+				connector = "\033[90m├─\033[0m"
+			} else {
+				connector = "\033[90m└─\033[0m"
+			}
 		}
 
 		// Determine marker: * for current doc, + for selected in select mode, space otherwise
@@ -908,11 +1319,15 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 			marker = g.getActiveColorCode() + "* " + "\033[0m"
 		}
 
-		// Check if document is cached
+		// Check if document is cached and show stats
 		cachedIndicator := ""
 		if node.Type == "document" {
 			if _, ok := g.docCache[node.Path]; ok {
-				cachedIndicator = " \033[33m·\033[0m" // Yellow dot for cached
+				if stats, hasStats := g.statsCache[node.Path]; hasStats && stats != nil {
+					cachedIndicator = fmt.Sprintf(" \033[90m%dF %s\033[0m", stats.FieldCount, formatBytes(stats.SizeBytes))
+				} else {
+					cachedIndicator = " \033[33m·\033[0m" // Yellow dot for cached (no stats yet)
+				}
 			}
 		}
 
@@ -947,11 +1362,11 @@ func (g *Gui) updateDetailsView(v *gocui.View) {
 	}
 
 	// Determine context based on current panel (or previous if in details)
-	showFunctions := g.collectionsTab == "functions" &&
-		(g.currentColumn == "collections" || (g.currentColumn == "details" && g.previousColumn == "collections"))
+	activeTab := g.collectionsTab
+	isFromCollections := g.currentColumn == "collections" || (g.currentColumn == "details" && g.previousColumn == "collections")
 
 	// Functions context: show function details or logs
-	if showFunctions {
+	if activeTab == "functions" && isFromCollections {
 		if g.detailsTab == "logs" {
 			g.renderFunctionLogs(v)
 			return
@@ -961,9 +1376,36 @@ func (g *Gui) updateDetailsView(v *gocui.View) {
 			g.renderFunctionDetails(v)
 			return
 		}
-		// No function selected yet
 		v.Clear()
 		fmt.Fprint(v, "\033[90mSelect a function to view details\033[0m")
+		return
+	}
+
+	// Storage context: show object metadata
+	if activeTab == "storage" && isFromCollections {
+		v.Clear()
+		g.renderStorageDetails(v)
+		return
+	}
+
+	// Auth context: show user details
+	if activeTab == "auth" && isFromCollections {
+		v.Clear()
+		g.renderAuthDetails(v)
+		return
+	}
+
+	// Rules context: show rules in details panel too
+	if activeTab == "rules" && isFromCollections {
+		v.Clear()
+		g.renderRulesDetails(v)
+		return
+	}
+
+	// Indexes context
+	if activeTab == "indexes" && isFromCollections {
+		v.Clear()
+		g.renderIndexesDetails(v)
 		return
 	}
 
@@ -997,8 +1439,14 @@ func (g *Gui) updateDetailsView(v *gocui.View) {
 		// New document - reset scroll position
 		g.detailsScrollPos = 0
 
-		// Format JSON
-		data, err := json.MarshalIndent(g.currentDocData, "", "  ")
+		// Format JSON (compact or pretty)
+		var data []byte
+		var err error
+		if g.compactJSON {
+			data, err = json.Marshal(g.currentDocData)
+		} else {
+			data, err = json.MarshalIndent(g.currentDocData, "", "  ")
+		}
 		if err != nil {
 			v.SetContent(fmt.Sprintf("Error formatting data: %v\n", err))
 			return
@@ -1039,10 +1487,35 @@ func (g *Gui) updateDetailsView(v *gocui.View) {
 			content.WriteString(formatDocStats(stats, g.currentDocStats != nil, idxCert))
 			content.WriteString("\n")
 		}
+		// Show schema summary (field names and types)
+		schema := buildSchemaSummary(g.currentDocData)
+		if schema != "" {
+			content.WriteString(fmt.Sprintf("\033[90m%s\033[0m\n", schema))
+		}
 		content.WriteString("\n")
 
-		// Syntax highlighting with chroma
-		content.WriteString(colorizeJSON(string(data)))
+		// Colorize JSON, then annotate timestamps
+		colorized := colorizeJSON(string(data))
+		if g.humanizeTimestamps {
+			// Annotate on raw text, then apply. We use the raw JSON lines to find timestamps
+			colorized = annotateTimestamps(string(data), colorized)
+		}
+
+		// Optionally add line numbers
+		if g.showLineNumbers {
+			lines := strings.Split(colorized, "\n")
+			width := len(fmt.Sprintf("%d", len(lines)))
+			var numbered strings.Builder
+			for i, line := range lines {
+				fmt.Fprintf(&numbered, "\033[90m%*d \033[0m%s", width, i+1, line)
+				if i < len(lines)-1 {
+					numbered.WriteString("\n")
+				}
+			}
+			colorized = numbered.String()
+		}
+
+		content.WriteString(colorized)
 
 		g.cachedDetailsLines = strings.Split(string(data), "\n")
 		g.cachedDetailsHeader = ""
@@ -1355,19 +1828,133 @@ func (g *Gui) updateHelpView(v *gocui.View) {
 		return
 	}
 
-	helpText := " \033[36m←/→\033[0m cols  \033[36mj/k\033[0m move  \033[36m[/]\033[0m tabs  \033[33mspace\033[0m select  \033[32mc\033[0m copy  \033[35m/\033[0m filter  \033[33mF\033[0m query  \033[35m?\033[0m help  \033[31mq\033[0m quit"
+	helpText := g.getContextHelpText()
+
+	// Build breadcrumb path
+	breadcrumb := g.buildBreadcrumb()
 	versionText := fmt.Sprintf("\033[90mv%s\033[0m ", g.version)
 
-	// Calculate padding to right-align version
+	// Calculate padding to right-align breadcrumb + version
 	width, _ := v.Size()
-	helpLen := 90 // Approximate visible length without ANSI codes
-	versionLen := len(g.version) + 2
-	padding := width - helpLen - versionLen
+	helpLen := g.visibleLength(helpText)
+	rightSide := breadcrumb + "  " + versionText
+	rightLen := g.visibleLength(breadcrumb) + 2 + len(g.version) + 2
+	padding := width - helpLen - rightLen
 	if padding < 1 {
 		padding = 1
 	}
 
-	fmt.Fprintf(v, "%s%*s%s", helpText, padding, "", versionText)
+	fmt.Fprintf(v, "%s%*s%s", helpText, padding, "", rightSide)
+}
+
+func (g *Gui) getContextHelpText() string {
+	c := "\033[36m" // cyan for keys
+	y := "\033[33m" // yellow
+	g2 := "\033[32m" // green
+	m := "\033[35m" // magenta
+	r := "\033[31m" // red
+	x := "\033[0m"  // reset
+
+	common := c + "←/→" + x + " cols  " + c + "j/k" + x + " move  " + c + "[/]" + x + " tabs  "
+
+	switch g.currentColumn {
+	case "projects":
+		return " " + common + y + "space" + x + " select  " + m + "/" + x + " filter  " + c + "S" + x + " scan  " + m + "?" + x + " help  " + r + "q" + x + " quit"
+	case "collections":
+		switch g.collectionsTab {
+		case "functions":
+			return " " + common + y + "space" + x + " select  " + m + "/" + x + " filter  " + c + "r" + x + " refresh  " + m + "?" + x + " help  " + r + "q" + x + " quit"
+		case "storage":
+			return " " + common + y + "space" + x + " open  " + c + "esc" + x + " back  " + m + "?" + x + " help  " + r + "q" + x + " quit"
+		case "auth":
+			return " " + common + y + "space" + x + " details  " + m + "?" + x + " help  " + r + "q" + x + " quit"
+		case "rules":
+			return " " + common + m + "?" + x + " help  " + r + "q" + x + " quit"
+		case "indexes":
+			return " " + common + m + "?" + x + " help  " + r + "q" + x + " quit"
+		default:
+			return " " + common + y + "space" + x + " select  " + m + "/" + x + " filter  " + y + "F" + x + " query  " + g2 + "c" + x + " copy  " + m + "?" + x + " help  " + r + "q" + x + " quit"
+		}
+	case "tree":
+		return " " + common + y + "space" + x + " expand  " + c + "enter" + x + " details  " + m + "/" + x + " filter  " + y + "F" + x + " query  " + g2 + "c" + x + " copy  " + m + "?" + x + " help  " + r + "q" + x + " quit"
+	case "details":
+		return " " + c + "j/k" + x + " scroll  " + c + "J/K" + x + " fast  " + c + "esc" + x + " back  " + c + "t" + x + " compact  " + c + "w" + x + " wrap  " + g2 + "c" + x + " copy  " + m + "/" + x + " search  " + m + "?" + x + " help  " + r + "q" + x + " quit"
+	default:
+		return " " + common + y + "space" + x + " select  " + m + "/" + x + " filter  " + m + "?" + x + " help  " + r + "q" + x + " quit"
+	}
+}
+
+// buildBreadcrumb returns a breadcrumb path showing current navigation context
+func (g *Gui) buildBreadcrumb() string {
+	parts := []string{}
+	if g.currentProject != "" {
+		parts = append(parts, g.currentProject)
+	}
+
+	switch g.collectionsTab {
+	case "storage":
+		parts = append(parts, "storage")
+		if g.currentBucket != "" {
+			parts = append(parts, g.currentBucket)
+			if g.storagePrefix != "" {
+				parts = append(parts, g.storagePrefix)
+			}
+		}
+	case "auth":
+		parts = append(parts, "auth")
+		if g.selectedAuthIdx < len(g.authUsers) && len(g.authUsers) > 0 {
+			u := g.authUsers[g.selectedAuthIdx]
+			if u.Email != "" {
+				parts = append(parts, u.Email)
+			} else {
+				parts = append(parts, u.UID)
+			}
+		}
+	case "rules":
+		parts = append(parts, "rules")
+	case "indexes":
+		parts = append(parts, "indexes")
+	case "functions":
+		parts = append(parts, "functions")
+		if g.currentFunction != nil {
+			parts = append(parts, g.currentFunction.DisplayName)
+		}
+	default:
+		if g.currentCollection != "" {
+			parts = append(parts, g.currentCollection)
+		}
+		if g.currentDocPath != "" && !strings.HasPrefix(g.currentDocPath, "__") && !strings.Contains(g.currentDocPath, " selected") {
+			docParts := strings.Split(g.currentDocPath, "/")
+			if len(docParts) > 0 {
+				parts = append(parts, docParts[len(docParts)-1])
+			}
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return "\033[90m" + strings.Join(parts, " > ") + "\033[0m"
+}
+
+// visibleLength returns the visible length of a string (excluding ANSI codes)
+func (g *Gui) visibleLength(s string) int {
+	inEscape := false
+	length := 0
+	for _, r := range s {
+		if r == '\033' {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			if r == 'm' {
+				inEscape = false
+			}
+			continue
+		}
+		length++
+	}
+	return length
 }
 
 // Firestore limits (https://firebase.google.com/docs/firestore/quotas)
@@ -1628,6 +2215,68 @@ func formatDocStats(stats docStats, accurate bool, idxCertainty indexCertainty) 
 	}
 
 	return line1 + "\n" + line2 + "  " + source
+}
+
+// buildSchemaSummary creates a one-line summary of field names and their types
+func buildSchemaSummary(data map[string]any) string {
+	if len(data) == 0 {
+		return ""
+	}
+	var parts []string
+	for key, val := range data {
+		typeName := inferType(val)
+		parts = append(parts, key+":"+typeName)
+	}
+	// Sort for consistent output
+	sortStrings(parts)
+	summary := "Schema: " + strings.Join(parts, ", ")
+	// Truncate if too long
+	if len(summary) > 120 {
+		summary = summary[:117] + "..."
+	}
+	return summary
+}
+
+// inferType returns a short type name for a value
+func inferType(val any) string {
+	if val == nil {
+		return "null"
+	}
+	switch v := val.(type) {
+	case string:
+		// Check if it looks like a timestamp
+		if len(v) > 18 && strings.Contains(v, "T") && strings.Contains(v, ":") {
+			return "timestamp"
+		}
+		return "string"
+	case float64:
+		if v == float64(int64(v)) {
+			return "int"
+		}
+		return "float"
+	case bool:
+		return "bool"
+	case map[string]any:
+		return "map"
+	case []any:
+		return "array"
+	default:
+		// Firestore integerValue comes as string from REST API
+		s := fmt.Sprintf("%v", val)
+		if _, err := fmt.Sscanf(s, "%d", new(int)); err == nil {
+			return "int"
+		}
+		return "string"
+	}
+}
+
+// sortStrings sorts a string slice in place (simple insertion sort)
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j] < s[j-1]; j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
 }
 
 // formatBytes formats bytes into human readable string

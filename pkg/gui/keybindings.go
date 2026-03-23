@@ -165,6 +165,69 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 				ContextQuery:  g.queryKeyL,
 			},
 		},
+		// Page Up / Page Down
+		{
+			Key:         gocui.KeyPgup,
+			Handler:     g.doPageUp,
+			Description: "Page up",
+			Contexts: map[Context]func() error{
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.blockAction,
+			},
+		},
+		{
+			Key:         gocui.KeyPgdn,
+			Handler:     g.doPageDown,
+			Description: "Page down",
+			Contexts: map[Context]func() error{
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.blockAction,
+			},
+		},
+		// Home / End
+		{
+			Key:         gocui.KeyHome,
+			Handler:     g.doGoToTop,
+			Description: "Go to top",
+			Contexts: map[Context]func() error{
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.blockAction,
+			},
+		},
+		{
+			Key:         gocui.KeyEnd,
+			Handler:     g.doGoToBottom,
+			Description: "Go to bottom",
+			Contexts: map[Context]func() error{
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.blockAction,
+			},
+		},
+		// Half-page scroll in details
+		{
+			Key:         gocui.KeyCtrlD,
+			Handler:     g.doHalfPageDown,
+			Description: "Half page down",
+			Contexts: map[Context]func() error{
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.blockAction,
+			},
+		},
+		{
+			Key:         gocui.KeyCtrlU,
+			Handler:     g.doHalfPageUp,
+			Description: "Half page up",
+			Contexts: map[Context]func() error{
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.blockAction,
+			},
+		},
 		// Tab
 		{
 			Key:         gocui.KeyTab,
@@ -177,11 +240,11 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 				ContextQuery:  g.queryNextField,
 			},
 		},
-		// [ and ] - switch Collections/Functions tabs
+		// [ and ] - cycle tabs backward/forward
 		{
 			Key:         '[',
-			Handler:     g.doSwitchTab,
-			Description: "Switch to Collections/Functions",
+			Handler:     g.doSwitchTabPrev,
+			Description: "Previous tab",
 			Contexts: map[Context]func() error{
 				ContextFilter: g.filterInsertBracketLeft,
 				ContextHelp:   g.blockAction,
@@ -191,8 +254,8 @@ func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
 		},
 		{
 			Key:         ']',
-			Handler:     g.doSwitchTab,
-			Description: "Switch to Collections/Functions",
+			Handler:     g.doSwitchTabNext,
+			Description: "Next tab",
 			Contexts: map[Context]func() error{
 				ContextFilter: g.filterInsertBracketRight,
 				ContextHelp:   g.blockAction,
@@ -260,8 +323,8 @@ func (g *Gui) filterBindings(km *KeybindingManager) []*Binding {
 	}
 
 	// Character handlers for filter input (includes jq syntax chars)
-	// Exclude chars that have dedicated context-aware bindings: hjkl, csrqveFQ, ?@/, []
-	filterChars := "abdfgimnoptuwxyzABCDEGHIJKLMNOPRTUVWXYZ0123456789"
+	// Exclude chars that have dedicated context-aware bindings: hjkl, csrqveFQgGpCtwx, ?@/, [], 123
+	filterChars := "afouzEIPVWXYZ456789"
 	filterChars += "-_. "
 	filterChars += "|(){}:\"'`,<>=!+*^$#~;&%\\"
 	for _, ch := range filterChars {
@@ -281,6 +344,63 @@ func (g *Gui) filterBindings(km *KeybindingManager) []*Binding {
 // actionBindings - document actions
 func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
 	return []*Binding{
+		// Go to top (g) / Go to bottom (G)
+		{
+			Key:         'g',
+			Handler:     g.doGoToTop,
+			Description: "Go to top",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('g'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('g'),
+			},
+		},
+		{
+			Key:         'G',
+			Handler:     g.doGoToBottom,
+			Description: "Go to bottom",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('G'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('G'),
+			},
+		},
+		// Number keys to jump panels
+		{
+			Key:         '1',
+			Handler:     g.doJumpToProjects,
+			Description: "Jump to Projects",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('1'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('1'),
+			},
+		},
+		{
+			Key:         '2',
+			Handler:     g.doJumpToCollections,
+			Description: "Jump to Collections",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('2'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('2'),
+			},
+		},
+		{
+			Key:         '3',
+			Handler:     g.doJumpToTree,
+			Description: "Jump to Tree",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('3'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('3'),
+			},
+		},
 		{
 			Key:         'F',
 			Handler:     g.doOpenQuery,
@@ -348,6 +468,102 @@ func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
 				ContextQuery:  g.queryInsertChar('S'),
 			},
 		},
+		// Copy document path
+		{
+			Key:         'p',
+			Handler:     g.doCopyPath,
+			Description: "Copy path",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('p'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('p'),
+			},
+		},
+		// Collapse all tree nodes
+		{
+			Key:         'C',
+			Handler:     g.doCollapseAll,
+			Description: "Collapse all",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('C'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('C'),
+			},
+		},
+		// Toggle compact JSON view
+		{
+			Key:         't',
+			Handler:     g.doToggleCompactJSON,
+			Description: "Toggle compact JSON",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('t'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('t'),
+			},
+		},
+		// Toggle word wrap
+		{
+			Key:         'w',
+			Handler:     g.doToggleWrap,
+			Description: "Toggle word wrap",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('w'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('w'),
+			},
+		},
+		// Clear cache (Shift+R)
+		{
+			Key:         'R',
+			Handler:     g.doClearCache,
+			Description: "Clear cache",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('R'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('R'),
+			},
+		},
+		// Show cache statistics
+		{
+			Key:         'i',
+			Handler:     g.doShowCacheStats,
+			Description: "Cache stats",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('i'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('i'),
+			},
+		},
+		// Toggle timestamp humanization
+		{
+			Key:         'T',
+			Handler:     g.doToggleTimestamps,
+			Description: "Toggle timestamps",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('T'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('T'),
+			},
+		},
+		// Export cached documents
+		{
+			Key:         'x',
+			Handler:     g.doExportCachedDocs,
+			Description: "Export cached docs",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('x'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('x'),
+			},
+		},
 		{
 			Key:         'e',
 			Handler:     g.doEditInEditor,
@@ -357,6 +573,193 @@ func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
 				ContextHelp:   g.blockAction,
 				ContextModal:  g.blockAction,
 				ContextQuery:  g.queryInsertChar('e'),
+			},
+		},
+		// Field size breakdown
+		{
+			Key:         'D',
+			Handler:     g.doFieldSizeBreakdown,
+			Description: "Field size breakdown",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('D'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('D'),
+			},
+		},
+		// Field type analysis
+		{
+			Key:         'A',
+			Handler:     g.doFieldTypeAnalysis,
+			Description: "Field type analysis",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('A'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('A'),
+			},
+		},
+		// Next search match
+		{
+			Key:         'n',
+			Handler:     g.doNextSearchMatch,
+			Description: "Next match",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('n'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('n'),
+			},
+		},
+		// Previous search match
+		{
+			Key:         'N',
+			Handler:     g.doPrevSearchMatch,
+			Description: "Previous match",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('N'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('N'),
+			},
+		},
+		// Copy field value
+		{
+			Key:         'y',
+			Handler:     g.doCopyFieldValue,
+			Description: "Copy field value",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('y'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('y'),
+			},
+		},
+		// Focus commands panel
+		{
+			Key:         '0',
+			Handler:     g.doFocusCommands,
+			Description: "Command log",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('0'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('0'),
+			},
+		},
+		// Fast scroll down in details (J)
+		{
+			Key:         'J',
+			Handler:     g.doFastScrollDown,
+			Description: "Scroll down 5 lines",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('J'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('J'),
+			},
+		},
+		// Fast scroll up in details (K)
+		{
+			Key:         'K',
+			Handler:     g.doFastScrollUp,
+			Description: "Scroll up 5 lines",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('K'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('K'),
+			},
+		},
+		// Toggle line numbers
+		{
+			Key:         'H',
+			Handler:     g.doToggleLineNumbers,
+			Description: "Toggle line numbers",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('H'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('H'),
+			},
+		},
+		// Cycle log level filter
+		{
+			Key:         'L',
+			Handler:     g.doCycleLogLevel,
+			Description: "Cycle log level filter",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('L'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('L'),
+			},
+		},
+		// Collection memory estimate
+		{
+			Key:         'M',
+			Handler:     g.doCollectionMemoryEstimate,
+			Description: "Collection memory",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('M'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('M'),
+			},
+		},
+		// Base64 decode
+		{
+			Key:         'B',
+			Handler:     g.doToggleBase64Decode,
+			Description: "Decode base64",
+			Contexts: map[Context]func() error{
+				ContextFilter: g.makeFilterCharAction('B'),
+				ContextHelp:   g.blockAction,
+				ContextModal:  g.blockAction,
+				ContextQuery:  g.queryInsertChar('B'),
+			},
+		},
+		// Remaining keys for filter: b, d, m, o, u
+		{
+			Key:         'b',
+			Handler:     g.makeFilterCharAction('b'),
+			Contexts: map[Context]func() error{
+				ContextQuery: g.queryInsertChar('b'),
+			},
+		},
+		{
+			Key:         'd',
+			Handler:     g.makeFilterCharAction('d'),
+			Contexts: map[Context]func() error{
+				ContextQuery: g.queryInsertChar('d'),
+			},
+		},
+		{
+			Key:         'm',
+			Handler:     g.makeFilterCharAction('m'),
+			Contexts: map[Context]func() error{
+				ContextQuery: g.queryInsertChar('m'),
+			},
+		},
+		{
+			Key:         'o',
+			Handler:     g.makeFilterCharAction('o'),
+			Contexts: map[Context]func() error{
+				ContextQuery: g.queryInsertChar('o'),
+			},
+		},
+		{
+			Key:         'u',
+			Handler:     g.makeFilterCharAction('u'),
+			Contexts: map[Context]func() error{
+				ContextQuery: g.queryInsertChar('u'),
+			},
+		},
+		{
+			Key:         'O',
+			Handler:     g.makeFilterCharAction('O'),
+			Contexts: map[Context]func() error{
+				ContextQuery: g.queryInsertChar('O'),
 			},
 		},
 	}

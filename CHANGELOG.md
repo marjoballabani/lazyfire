@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.41] - 2026-03-23
+
+### Added
+- **Cloud Storage browser** - Browse Cloud Storage buckets and objects (read-only)
+  - List all buckets with location and storage class
+  - Navigate folders and files within a bucket (Space/Enter to open, Esc to go back)
+  - Object details panel showing name, size, content type, timestamps
+- **Firebase Auth browser** - Browse Firebase Auth users (read-only)
+  - List users with email/UID, providers, disabled status
+  - User details panel with UID, email, verified, timestamps, providers
+- **Firestore Rules viewer** - View current security rules with syntax highlighting
+  - rules_version/service (cyan), match (green), allow (yellow), comments (dim)
+  - Shows deployment timestamp
+- **Firestore Indexes viewer** - View composite indexes with state color coding
+  - Shows collection group, query scope, fields, and state (READY/CREATING/NEEDS_REPAIR)
+- **6-tab system** - Collections, Functions, Storage, Auth, Rules, Indexes
+  - `]` cycles forward, `[` cycles backward through tabs
+  - Sliding window of 3 tabs in panel header
+- **Context-aware help bar** - Bottom bar shows only shortcuts relevant to the active tab
+- **Per-tab breadcrumb** - Status bar shows context-aware path for active tab
+- **Sprint 1-2 enhancements** (30 features):
+  - Page Up/Down, Home/End, g/G, Ctrl+d/u navigation
+  - 1/2/3 panel jump keys
+  - Cached doc count next to collection names
+  - Field count and size display in tree
+  - Breadcrumb path in status bar
+  - Tree indentation guides
+  - Copy path (p), Collapse all (C), Compact JSON (t), Word wrap (w)
+  - Export cached docs (x), Cache stats (i), Clear cache (R)
+  - Search highlight, Timestamps toggle (T), Schema summary
+  - Fast scroll J/K, Search match n/N, Command log (0)
+  - Line numbers (H), Log level filter (L)
+  - Field size breakdown (D), Field type analysis (A), Memory estimate (M)
+  - Copy field value (y), Base64 decode (B)
+
+### Changed
+- Tab switching now uses sliding window of 3 tabs (was showing all 6)
+- `[` key now cycles backward through tabs (was same as `]`)
+- Per-tab project switching loads data for the active tab
+
 ## [0.1.40] - 2026-03-11
 
 ### Changed

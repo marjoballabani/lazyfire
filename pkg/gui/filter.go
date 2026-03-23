@@ -202,6 +202,33 @@ func (g *Gui) getDetailsFilter() string {
 	return g.detailsFilter
 }
 
+// highlightMatches wraps matching text in reverse video ANSI codes
+func highlightMatches(text, filter string) string {
+	if filter == "" {
+		return text
+	}
+	lowerText := strings.ToLower(text)
+	lowerFilter := strings.ToLower(filter)
+
+	var result strings.Builder
+	i := 0
+	for i < len(text) {
+		idx := strings.Index(lowerText[i:], lowerFilter)
+		if idx == -1 {
+			result.WriteString(text[i:])
+			break
+		}
+		// Write text before match
+		result.WriteString(text[i : i+idx])
+		// Write highlighted match
+		result.WriteString("\033[7m") // Reverse video
+		result.WriteString(text[i+idx : i+idx+len(filter)])
+		result.WriteString("\033[27m") // Reset reverse
+		i = i + idx + len(filter)
+	}
+	return result.String()
+}
+
 // getOriginalTreeNodeIndex maps a filtered index back to the original treeNodes index
 func (g *Gui) getOriginalTreeNodeIndex(filteredIdx int) int {
 	filtered := g.getFilteredTreeNodes()
@@ -242,7 +269,10 @@ func (g *Gui) renderFilteredDetails(v *gocui.View) {
 	matchCount := 0
 	for _, line := range lines {
 		if g.matchesFilter(line, filter) {
-			content.WriteString(colorizeLine(line))
+			colored := colorizeLine(line)
+			// Highlight matching text with reverse video
+			colored = highlightMatches(colored, filter)
+			content.WriteString(colored)
 			content.WriteString("\n")
 			matchCount++
 		}

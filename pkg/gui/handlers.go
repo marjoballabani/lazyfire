@@ -32,12 +32,24 @@ func (g *Gui) selectProject(gui *gocui.Gui) error {
 	}
 
 	selectedProject := filtered[g.selectedProjectIndex]
-	loadFunctions := g.collectionsTab == "functions"
 
-	if loadFunctions {
+	switch g.collectionsTab {
+	case "functions":
 		g.logCommand("api", fmt.Sprintf("ListFunctions(%s) loading...", selectedProject.ID), "running")
 		g.functionsLoading = true
-	} else {
+	case "storage":
+		g.logCommand("api", fmt.Sprintf("ListBuckets(%s) loading...", selectedProject.ID), "running")
+		g.storageLoading = true
+	case "auth":
+		g.logCommand("api", fmt.Sprintf("ListAuthUsers(%s) loading...", selectedProject.ID), "running")
+		g.authLoading = true
+	case "rules":
+		g.logCommand("api", fmt.Sprintf("GetRules(%s) loading...", selectedProject.ID), "running")
+		g.rulesLoading = true
+	case "indexes":
+		g.logCommand("api", fmt.Sprintf("ListIndexes(%s) loading...", selectedProject.ID), "running")
+		g.indexesLoading = true
+	default:
 		g.logCommand("api", fmt.Sprintf("ListCollections(%s) loading...", selectedProject.ID), "running")
 		g.collectionsLoading = true
 	}
@@ -70,11 +82,34 @@ func (g *Gui) selectProject(gui *gocui.Gui) error {
 		g.currentFunction = nil
 		g.functionLogs = nil
 		g.selectedFunctionIdx = 0
+		// Clear storage state
+		g.storageBuckets = nil
+		g.storageObjects = nil
+		g.currentBucket = ""
+		g.storagePrefix = ""
+		g.storagePrefixStack = nil
+		g.selectedBucketIdx = 0
+		g.selectedObjectIdx = 0
+		// Clear auth state
+		g.authUsers = nil
+		g.selectedAuthIdx = 0
+		// Clear rules/indexes state
+		g.firestoreRules = nil
+		g.firestoreIndexes = nil
 
 		// Load based on active tab
-		if loadFunctions {
+		switch g.collectionsTab {
+		case "functions":
 			g.loadFunctions()
-		} else {
+		case "storage":
+			g.loadStorageBuckets()
+		case "auth":
+			g.loadAuthUsers()
+		case "rules":
+			g.loadFirestoreRules()
+		case "indexes":
+			g.loadFirestoreIndexes()
+		default:
 			if err := g.loadCollections(); err != nil {
 				g.g.Update(func(gui *gocui.Gui) error {
 					g.collectionsLoading = false
@@ -457,11 +492,20 @@ func (g *Gui) buildHelpPopup() {
 		{Key: "", Label: "Global", IsHeader: true},
 		{Key: "←/→ h/l", Label: "Switch panels"},
 		{Key: "↑/↓ j/k", Label: "Move up/down"},
+		{Key: "g/G", Label: "Go to top/bottom"},
+		{Key: "PgUp/PgDn", Label: "Page up/down"},
+		{Key: "1/2/3", Label: "Jump to panel"},
 		{Key: "Space", Label: "Select / Expand", Action: g.doSpace},
 		{Key: "/", Label: "Filter / Search", Action: g.doStartFilter},
 		{Key: "Esc", Label: "Back / Collapse / Close"},
 		{Key: "r", Label: "Refresh", Action: g.doRefresh},
-		{Key: "@", Label: "Command log", Action: g.doToggleModal},
+		{Key: "R", Label: "Clear cache", Action: g.doClearCache},
+		{Key: "i", Label: "Cache stats", Action: g.doShowCacheStats},
+		{Key: "M", Label: "Collection memory", Action: g.doCollectionMemoryEstimate},
+		{Key: "A", Label: "Field type analysis", Action: g.doFieldTypeAnalysis},
+		{Key: "L", Label: "Cycle log level", Action: g.doCycleLogLevel},
+		{Key: "0", Label: "Command log", Action: g.doFocusCommands},
+		{Key: "@", Label: "Command log (modal)", Action: g.doToggleModal},
 		{Key: "?", Label: "This help"},
 		{Key: "q", Label: "Quit", Action: g.doQuit},
 		{Key: "", Label: g.getPanelName(), IsHeader: true},
@@ -476,8 +520,9 @@ func (g *Gui) buildHelpPopup() {
 		)
 	case "collections":
 		items = append(items,
-			PopupItem{Key: "[ / ]", Label: "Switch Collections/Functions", Action: g.doSwitchTab},
-			PopupItem{Key: "Space", Label: "Load documents/Select function", Action: g.doSpace},
+			PopupItem{Key: "[ / ]", Label: "Cycle tabs (6 tabs)", Action: g.doSwitchTab},
+			PopupItem{Key: "Space", Label: "Select / Navigate", Action: g.doSpace},
+			PopupItem{Key: "Esc", Label: "Back (storage folders)"},
 			PopupItem{Key: "F", Label: "Query builder", Action: g.doOpenQuery},
 		)
 	case "tree":
@@ -485,9 +530,14 @@ func (g *Gui) buildHelpPopup() {
 			PopupItem{Key: "Space", Label: "Expand / Collapse", Action: g.doSpace},
 			PopupItem{Key: "Enter", Label: "Open in details", Action: g.doEnter},
 			PopupItem{Key: "v", Label: "Select mode (multi-select)", Action: g.doToggleSelectMode},
+			PopupItem{Key: "C", Label: "Collapse all nodes", Action: g.doCollapseAll},
 			PopupItem{Key: "F", Label: "Query builder", Action: g.doOpenQuery},
+			PopupItem{Key: "p", Label: "Copy path to clipboard", Action: g.doCopyPath},
 			PopupItem{Key: "c", Label: "Copy JSON to clipboard", Action: g.doCopyJSON},
 			PopupItem{Key: "s", Label: "Save JSON to Downloads", Action: g.doSaveJSON},
+			PopupItem{Key: "x", Label: "Export all cached docs", Action: g.doExportCachedDocs},
+			PopupItem{Key: "A", Label: "Field type analysis", Action: g.doFieldTypeAnalysis},
+			PopupItem{Key: "M", Label: "Collection memory estimate", Action: g.doCollectionMemoryEstimate},
 		)
 	case "details":
 		// Show [ / ] only when Functions tab is active
@@ -496,7 +546,18 @@ func (g *Gui) buildHelpPopup() {
 		}
 		items = append(items,
 			PopupItem{Key: "j/k", Label: "Scroll content"},
+			PopupItem{Key: "J/K", Label: "Scroll 5 lines"},
+			PopupItem{Key: "Ctrl+d/u", Label: "Half-page scroll"},
 			PopupItem{Key: "Esc", Label: "Go back"},
+			PopupItem{Key: "t", Label: "Toggle compact JSON", Action: g.doToggleCompactJSON},
+			PopupItem{Key: "w", Label: "Toggle word wrap", Action: g.doToggleWrap},
+			PopupItem{Key: "T", Label: "Toggle timestamps", Action: g.doToggleTimestamps},
+			PopupItem{Key: "H", Label: "Toggle line numbers", Action: g.doToggleLineNumbers},
+			PopupItem{Key: "n/N", Label: "Next/prev search match"},
+			PopupItem{Key: "y", Label: "Copy field value", Action: g.doCopyFieldValue},
+			PopupItem{Key: "D", Label: "Field size breakdown", Action: g.doFieldSizeBreakdown},
+			PopupItem{Key: "B", Label: "Decode base64 value", Action: g.doToggleBase64Decode},
+			PopupItem{Key: "p", Label: "Copy path to clipboard", Action: g.doCopyPath},
 			PopupItem{Key: "c", Label: "Copy JSON to clipboard", Action: g.doCopyJSON},
 			PopupItem{Key: "s", Label: "Save JSON to Downloads", Action: g.doSaveJSON},
 			PopupItem{Key: "e", Label: "Open in editor", Action: g.doEditInEditor},
