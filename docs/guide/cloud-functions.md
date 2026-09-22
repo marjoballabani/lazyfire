@@ -1,15 +1,15 @@
 # Cloud Functions
 
-LazyFire lets you browse Cloud Functions and view their logs in real-time.
+LazyFire lets you browse Cloud Functions and read their recent logs.
 
 ## Accessing Functions
 
 1. Select a project in the **Projects** panel
-2. Navigate to the **Collections** panel
+2. Move to the **Collections** panel (`3`)
 3. Press `]` to switch to the **Functions** tab
 
 ```
-┌─ [Collections] [Functions] ─┐
+┌─ Collections - Functions ───┐
 │ ⚡ processOrder             │
 │ ⚡ sendEmail                │
 │ ⚡ onUserCreate             │
@@ -33,7 +33,7 @@ Each function displays:
 
 ## Function Details
 
-Press `Space` on a function to view its details:
+Press `Space` on a function to select it and load its details, or `Enter` to also move into the Details panel:
 
 ```
 ┌─ Function Details ──────────┐
@@ -48,11 +48,11 @@ Press `Space` on a function to view its details:
 └─────────────────────────────┘
 ```
 
-## Live Logs
+## Logs
 
-View function execution logs in real-time:
+View the latest 50 log entries of a function:
 
-1. Select a function with `Space`
+1. Open a function with `Enter`
 2. Press `]` to switch to the **Logs** tab
 
 ```
@@ -75,20 +75,23 @@ View function execution logs in real-time:
 
 ### Refreshing Logs
 
-- Logs auto-refresh every 3 seconds when viewing
-- Press `r` to manually refresh
+Press `r` on the Logs tab to load the latest entries.
+
+### Filtering by Severity
+
+Press `L` to cycle the log level filter: all levels, then ERROR, WARNING, INFO and DEBUG. The active filter is shown above the log lines.
 
 ## Keybindings Summary
 
 | Key | Action |
 |-----|--------|
-| `]` | Switch to Functions tab (Collections panel) |
-| `[` | Switch to Collections tab |
-| `Space` | Select function, show details |
-| `]` | Switch to Logs tab (Details panel) |
-| `[` | Switch to Details tab |
-| `r` | Refresh logs |
-| `/` | Filter functions by name |
+| `[` / `]` | Switch collections panel tabs (Functions is the second) |
+| `Space` | Select function |
+| `Enter` | Select function and focus Details |
+| `[` / `]` | Switch between Details and Logs (in Details) |
+| `r` | Refresh functions, or logs on the Logs tab |
+| `L` | Cycle log level filter |
+| `/` | Filter functions by name or region |
 
 ## State Preservation
 

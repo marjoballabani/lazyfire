@@ -1,73 +1,60 @@
 # Filtering & Search
 
-LazyFire includes powerful filtering to quickly find what you need.
-
-## Basic Filtering
-
-Press `/` to start filtering in any panel:
+Press `/` in a panel to filter it. The list narrows as you type.
 
 ```
-┌─ Collections ───────────────┐
-│ Filter: user█               │  ← Type to filter
-├─────────────────────────────┤
-│ 📁 users                    │  ← Matching items
-│ 📁 user_settings            │
-└─────────────────────────────┘
+╭─ Collections ──────────────╮
+│ * users                    │
+│   user_settings            │
+╰───────────────2/15 matched─╯
+ Filter Collections: user█
 ```
 
-## Filter Behavior
+## How filtering works
 
-- Filtering is **case-insensitive**
-- Matches anywhere in the name (not just prefix)
-- Results update as you type
-- Empty filter shows all items
+- Matching is case-insensitive and finds the text anywhere in the name.
+- The prompt at the bottom is a normal text input: move with `←`/`→`, delete a word with `Ctrl+w`, clear with `Ctrl+u`, and paste.
+- `↑` and `↓` move through the matches while you type.
+- `Enter` keeps the filter and closes the prompt. The panel border turns yellow while a filter is kept.
+- `Esc` while typing cancels. `Esc` later clears a kept filter, and the item you had selected stays selected.
 
-## Filter Keybindings
+## What each panel filters
+
+| Panel | Matches on |
+|-------|------------|
+| Projects | Project name and ID |
+| Databases | Database ID and location |
+| Collections tab | Collection name |
+| Functions tab | Function name and region |
+| Storage tab | Bucket or file name in the current folder |
+| Auth tab | Email, UID and display name |
+| Tree | Document ID and path |
+| Details | Lines of the open document, or a jq query |
+
+Each panel keeps its own filter, so switching panels doesn't lose it.
+
+## Filtering a document
+
+In Details, the filter shows only the lines of the JSON that contain your text, with the matches highlighted. `n` and `N` move the cursor to the next and previous match.
+
+Start the filter with `.` to run a [jq](https://jqlang.github.io/jq/) query on the document instead:
+
+| Filter | Result |
+|--------|--------|
+| `name` | Lines containing "name" |
+| `.name` | The `name` field |
+| `.address.city` | A nested field |
+| `.tags[0]` | The first element of an array |
+| `.items \| length` | The number of items |
+
+`c` and `s` copy or save the jq result instead of the whole document while a jq filter is active.
+
+## Keys
 
 | Key | Action |
 |-----|--------|
-| `/` | Start filtering |
-| `Enter` | Apply filter and navigate |
-| `Esc` | Cancel filter |
-| `Backspace` | Delete character |
-| `Ctrl+u` | Clear filter text |
-
-## Panel-Specific Filtering
-
-Each panel maintains its own filter:
-
-| Panel | What it filters |
-|-------|-----------------|
-| Projects | Project names |
-| Collections | Collection names or function names |
-| Tree | Document IDs |
-| Details | (scrolling, not filterable) |
-
-## Filter Indicators
-
-When a filter is active, the panel shows:
-- Filter text in the header
-- Count of matching items
-- Visual indicator that filter is applied
-
-```
-┌─ Collections (3/15) ────────┐
-│ Filter: user                │
-├─────────────────────────────┤
-│ 📁 users                    │
-│ 📁 user_data                │
-│ 📁 user_settings            │
-└─────────────────────────────┘
-```
-
-## Clearing Filters
-
-- Press `Esc` while typing to cancel
-- Press `Esc` again to clear committed filter
-- Switching panels preserves filters
-
-## Tips
-
-1. **Quick jump**: Type `/` then first few characters of what you want
-2. **Partial match**: Filter `ord` matches `orders`, `order_items`, `records`
-3. **Navigate while filtered**: Use `j`/`k` to move through filtered results
+| `/` | Start filtering the focused panel |
+| `Enter` | Keep the filter |
+| `Esc` | Cancel while typing, or clear a kept filter |
+| `↑` / `↓` | Move through matches while typing |
+| `n` / `N` | Next / previous match in Details |

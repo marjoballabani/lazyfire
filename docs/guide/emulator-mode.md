@@ -26,6 +26,7 @@ When emulator mode is enabled:
 - LazyFire connects directly to the local Firestore emulator
 - Firebase CLI authentication is skipped
 - The project list shows only your configured `projectId`
+- The Databases panel shows only `(default)`
 - Composite index detection is disabled (Admin API is not available locally)
 - All read operations work the same as production
 
@@ -46,6 +47,7 @@ lazyfire
 ## Limitations
 
 - Only Firestore is supported in emulator mode
-- Cloud Functions view is not available
+- The Functions, Storage, Auth and Indexes tabs stay empty, and the Rules tab shows a placeholder
+- Only the default database is listed
 - Composite index detection always reports unknown
 - Project details (region, type) show minimal information

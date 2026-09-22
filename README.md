@@ -8,18 +8,20 @@ A terminal UI for browsing Firebase Firestore, inspired by [lazygit](https://git
 
 ## Features
 
-- Browse Firestore collections and documents
+- Browse Firestore collections and documents, across all of a project's databases
 - Expandable tree view for nested subcollections
 - View document data as syntax-highlighted JSON
-- **Cloud Functions Browser** - View functions, details, and live logs with `[` / `]` tabs
+- **Cloud Functions Browser** - View functions, details, and logs with `[` / `]` tabs
+- **Storage, Auth, Rules and Indexes tabs** - Browse buckets and files, Auth users, security rules and composite indexes (read-only)
 - **Query Builder** - Interactive Firestore query builder with WHERE, ORDER BY, LIMIT
 - **jq query support** for filtering JSON in details panel
 - **Visual select mode** for multi-document selection and parallel fetching
 - **Smart caching** - Documents and collections cached with visual indicator
 - **Document stats** with Firestore limits validation (size, fields, depth)
 - Filter/search across all panels
-- Vim-style keybindings (h/j/k/l)
-- Mouse support (click to select, navigate)
+- Vim-style keybindings (h/j/k/l), with keys that follow the focused panel
+- **Keybindings menu** - `?` lists the keys for the focused panel; filter it with `/` and run a key with `Enter`
+- Mouse support (click, double click to open, wheel scrolling, click tabs)
 - Customizable theme (hex colors, 256-color, bold)
 - Nerd Font icons (optional, with graceful fallback)
 - Uses existing Firebase CLI authentication
@@ -74,7 +76,7 @@ Download pre-built binaries from the [releases page](https://github.com/marjobal
 **Panels:**
 - **Projects** - Your Firebase projects
 - **Databases** - The project's Firestore databases, for projects with more than the default one
-- **Collections** - Root collections or Cloud Functions (switch with `[` / `]`)
+- **Collections** - Tabs for Collections, Functions, Storage, Auth, Rules and Indexes (switch with `[` / `]`)
 - **Tree** - Documents and subcollections (expandable)
 - **Details** - Document JSON / Function details / Logs (switch with `[` / `]` in Functions view)
 - **Commands** - API call status

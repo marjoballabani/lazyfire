@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Tab` in Details goes back to the previous panel, like `Esc`
 - Rules and indexes are shown in full in the Details panel, and the Rules/Indexes tabs scroll with `j`/`k`
 - "No matches" hint when a filter hides every item
+- **Documentation site redesign** - The home page is built around a working replica of LazyFire you can drive with the real keys; new guides for databases and the Storage, Auth, Rules and Indexes tabs; all guides updated for the new keys
 
 ### Changed
 - The filter prompt is a real text input: every key types (including `q`, `j`, `Q`, `U` and non-ASCII), with cursor movement, `Ctrl+w`/`Ctrl+u` and paste
