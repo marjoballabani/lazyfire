@@ -84,12 +84,15 @@ func annotateTimestamps(rawJSON, colorized string) string {
 		if i >= len(colorLines) {
 			break
 		}
-		// Look for quoted ISO timestamp strings
-		if idx := strings.Index(rawLine, `"`); idx >= 0 {
-			rest := rawLine[idx+1:]
-			endIdx := strings.Index(rest, `"`)
-			if endIdx > 0 {
-				val := rest[:endIdx]
+		// Look for a quoted ISO timestamp as the line's value: the last
+		// quoted string, so `"createdAt": "2024-..."` checks the timestamp
+		// rather than the key
+		trimmed := strings.TrimSuffix(strings.TrimSpace(rawLine), ",")
+		if strings.HasSuffix(trimmed, `"`) {
+			rest := trimmed[:len(trimmed)-1]
+			startIdx := strings.LastIndex(rest, `"`)
+			if startIdx >= 0 {
+				val := rest[startIdx+1:]
 				if t, err := time.Parse(time.RFC3339Nano, val); err == nil {
 					humanized := t.Local().Format("Jan 2, 2006 3:04:05 PM")
 					colorLines[i] = colorLines[i] + "  \033[90m// " + humanized + "\033[0m"

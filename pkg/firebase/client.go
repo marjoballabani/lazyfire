@@ -20,6 +20,8 @@ type Client struct {
 	ctx            context.Context
 	config         *config.Config
 	currentProject string
+	// currentDatabase is the Firestore database ID; empty means the default one
+	currentDatabase string
 	usingLocalAuth bool
 	emulatorMode   bool
 	firestoreHost  string // e.g. "localhost:8080" for emulator
@@ -30,6 +32,16 @@ type Project struct {
 	ID          string // Firebase project ID
 	DisplayName string // Human-readable project name
 	Environment string // Environment identifier (same as ID for now)
+}
+
+// DefaultDatabase is the ID of the database every Firestore project has
+const DefaultDatabase = "(default)"
+
+// Database is a Firestore database in a project.
+type Database struct {
+	ID         string // DefaultDatabase or a named database ID
+	LocationID string
+	Type       string // FIRESTORE_NATIVE or DATASTORE_MODE
 }
 
 // ProjectDetails contains extended information about a Firebase project.
@@ -127,11 +139,25 @@ func (c *Client) ListProjects() ([]Project, error) {
 	return projects, nil
 }
 
-// SetCurrentProject switches the active Firebase project.
-// This affects which Firestore database is queried via REST API.
+// SetCurrentProject switches the active Firebase project and goes back to
+// its default Firestore database.
 func (c *Client) SetCurrentProject(projectID string) error {
 	c.currentProject = projectID
+	c.currentDatabase = ""
 	return nil
+}
+
+// SetCurrentDatabase switches the Firestore database queried in the current project.
+func (c *Client) SetCurrentDatabase(databaseID string) {
+	c.currentDatabase = databaseID
+}
+
+// GetCurrentDatabase returns the Firestore database ID in use.
+func (c *Client) GetCurrentDatabase() string {
+	if c.currentDatabase == "" {
+		return DefaultDatabase
+	}
+	return c.currentDatabase
 }
 
 // GetCurrentProject returns the currently active project ID.

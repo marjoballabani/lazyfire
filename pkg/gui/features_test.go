@@ -87,11 +87,8 @@ func TestHighlightMatches(t *testing.T) {
 // --- annotateTimestamps ---
 
 func TestAnnotateTimestamps(t *testing.T) {
-	// annotateTimestamps finds the first quoted string on each raw line.
-	// If that string parses as RFC3339, it appends a human-readable comment.
-	// In real JSON, "key": "value" means the key is the first quoted string,
-	// so timestamps are only annotated when the key itself looks like a timestamp
-	// or the line has only the value (e.g., array element).
+	// annotateTimestamps checks the value of each raw line (its last quoted
+	// string). If that parses as RFC3339, it appends a human-readable comment.
 	tests := []struct {
 		name      string
 		rawJSON   string
@@ -111,10 +108,16 @@ func TestAnnotateTimestamps(t *testing.T) {
 			wantComment: true,
 		},
 		{
-			name:        "key-value pair - first quoted string is key, not timestamp",
-			rawJSON:     `  "createdAt": "2024-01-15T10:30:00Z"`,
-			colorized:   `  "createdAt": "2024-01-15T10:30:00Z"`,
-			wantComment: false, // first quoted string is "createdAt", not a timestamp
+			name:        "key-value pair - timestamp value gets annotated",
+			rawJSON:     `  "createdAt": "2024-01-15T10:30:00Z",`,
+			colorized:   `  "createdAt": "2024-01-15T10:30:00Z",`,
+			wantComment: true,
+		},
+		{
+			name:        "timestamp-like key with plain value not annotated",
+			rawJSON:     `  "2024-01-15T10:30:00Z": "hello"`,
+			colorized:   `  "2024-01-15T10:30:00Z": "hello"`,
+			wantComment: false,
 		},
 		{
 			name:        "non-timestamp string not annotated",
@@ -1019,7 +1022,6 @@ func TestClearDetailsCache(t *testing.T) {
 	g := newTestGui()
 	g.cachedDetailsContent = "some content"
 	g.cachedDetailsDocPath = "users/u1"
-	g.cachedDetailsLines = []string{"line1", "line2"}
 	g.cachedDetailsHeader = "header"
 	g.detailsScrollPos = 50
 
@@ -1030,9 +1032,6 @@ func TestClearDetailsCache(t *testing.T) {
 	}
 	if g.cachedDetailsDocPath != "" {
 		t.Error("cachedDetailsDocPath should be empty")
-	}
-	if g.cachedDetailsLines != nil {
-		t.Error("cachedDetailsLines should be nil")
 	}
 	if g.cachedDetailsHeader != "" {
 		t.Error("cachedDetailsHeader should be empty")

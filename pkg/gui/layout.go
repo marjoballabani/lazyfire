@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jesseduffield/gocui"
+	"github.com/marjoballabani/lazyfire/pkg/firebase"
 	"github.com/marjoballabani/lazyfire/pkg/gui/icons"
 )
 
@@ -29,32 +30,32 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 	// Calculate heights for left panels (3 stacked)
 	leftHeight := maxY - 3 // Leave room for help bar
 
-	var projectsEnd, collectionsEnd int
+	var projectsEnd, databasesEnd, collectionsEnd int
 	collapsedSingleLine := 3 // Height for collapsed single-line panel (borders + 1 line)
 
+	// Projects and databases collapse to 1 line unless focused
+	projectsEnd = collapsedSingleLine
+	databasesEnd = 2 * collapsedSingleLine
 	switch g.currentColumn {
 	case "projects":
 		// Projects expanded, others share remaining space
-		expandedHeight := leftHeight / 2
-		remainingHeight := leftHeight - expandedHeight
-		projectsEnd = expandedHeight
-		collectionsEnd = expandedHeight + remainingHeight/2
+		projectsEnd = leftHeight / 2
+		databasesEnd = projectsEnd + collapsedSingleLine
+		collectionsEnd = databasesEnd + (leftHeight-databasesEnd)/2
+	case "databases":
+		// Databases sized to the list, up to half the remaining space
+		databasesHeight := max(collapsedSingleLine+2, min(len(g.databases)+2, (leftHeight-projectsEnd)/2))
+		databasesEnd = projectsEnd + databasesHeight
+		collectionsEnd = databasesEnd + (leftHeight-databasesEnd)/2
 	case "collections":
-		// Projects collapsed to 1 line, collections expanded
-		remainingHeight := leftHeight - collapsedSingleLine
-		expandedHeight := remainingHeight * 2 / 3
-		projectsEnd = collapsedSingleLine
-		collectionsEnd = collapsedSingleLine + expandedHeight
+		// Collections expanded
+		collectionsEnd = databasesEnd + (leftHeight-databasesEnd)*2/3
 	case "tree":
-		// Projects collapsed to 1 line, tree gets more space
-		remainingHeight := leftHeight - collapsedSingleLine
-		projectsEnd = collapsedSingleLine
-		collectionsEnd = collapsedSingleLine + remainingHeight/3
+		// Tree gets more space
+		collectionsEnd = databasesEnd + (leftHeight-databasesEnd)/3
 	default: // details or other
-		// Projects collapsed to 1 line, equal split for collections/tree
-		remainingHeight := leftHeight - collapsedSingleLine
-		projectsEnd = collapsedSingleLine
-		collectionsEnd = collapsedSingleLine + remainingHeight/2
+		// Equal split for collections/tree
+		collectionsEnd = databasesEnd + (leftHeight-databasesEnd)/2
 	}
 
 	// Right side layout
@@ -75,48 +76,42 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 	}
 
 	if v, err := gui.View(g.views.projects); err == nil {
-		hasCommittedFilter := g.hasActiveFilter("projects")
-		isTypingFilter := g.isFilteringPanel("projects")
-		isFocused := g.currentColumn == "projects"
-
-		// Title/border color: filter color when focused AND filter is committed (not while typing)
-		if isFocused && hasCommittedFilter {
-			// Must set global SelFrameColor because gocui uses it for focused views
-			gui.SelFrameColor = g.theme.FilterBorderColor
-			gui.SelFgColor = g.theme.FilterBorderColor
-			v.TitleColor = g.theme.FilterBorderColor
-			v.FrameColor = g.theme.FilterBorderColor
-			v.Title = " " + icons.FIREBASE_ICON + " Projects "
-		} else if isFocused {
-			gui.SelFrameColor = g.theme.ActiveBorderColor
-			gui.SelFgColor = g.theme.ActiveBorderColor
-			v.TitleColor = g.theme.ActiveBorderColor
-			v.FrameColor = g.theme.ActiveBorderColor
-			v.Title = " " + icons.FIREBASE_ICON + " Projects "
-		} else {
-			v.TitleColor = g.theme.InactiveBorderColor
-			v.FrameColor = g.theme.InactiveBorderColor
-			v.Title = " " + icons.FIREBASE_ICON + " Projects "
-		}
+		g.stylePanelFrame(gui, v, "projects")
 		// Show footer only when expanded
-		hasFilter := hasCommittedFilter || isTypingFilter
-		if isFocused {
-			filtered := g.getFilteredProjects()
-			if hasFilter {
-				v.Footer = fmt.Sprintf("%d/%d matched", len(filtered), len(g.projects))
-			} else if len(g.projects) > 0 {
-				v.Footer = fmt.Sprintf("%d of %d", g.selectedProjectIndex+1, len(g.projects))
-			} else {
-				v.Footer = "0 of 0"
-			}
+		if g.currentColumn == "projects" {
+			v.Footer = g.listFooter(CtxProjects, len(g.projects))
 		} else {
-			v.Footer = "" // Hide footer when collapsed
+			v.Footer = ""
 		}
 		g.updateProjectsView(v)
 	}
 
+	// Databases panel (below projects)
+	if v, err := gui.SetView(g.views.databases, 0, projectsEnd, leftWidth-1, databasesEnd-1, 0); err != nil {
+		if !errors.Is(err, gocui.ErrUnknownView) {
+			return err
+		}
+		v.Title = " " + icons.DATABASE_ICON + " Databases "
+		v.TitleColor = g.theme.InactiveBorderColor
+		v.BgColor = gocui.ColorDefault
+		v.FgColor = gocui.ColorDefault
+		v.SelBgColor = g.theme.SelectedLineBgColor
+		v.SelFgColor = gocui.ColorDefault
+		v.FrameRunes = g.roundedFrameRunes
+	}
+
+	if v, err := gui.View(g.views.databases); err == nil {
+		g.stylePanelFrame(gui, v, "databases")
+		if g.currentColumn == "databases" {
+			v.Footer = g.listFooter(CtxDatabases, len(g.databases))
+		} else {
+			v.Footer = ""
+		}
+		g.updateDatabasesView(v)
+	}
+
 	// Collections/Functions panel (middle-left)
-	if v, err := gui.SetView(g.views.collections, 0, projectsEnd, leftWidth-1, collectionsEnd-1, 0); err != nil {
+	if v, err := gui.SetView(g.views.collections, 0, databasesEnd, leftWidth-1, collectionsEnd-1, 0); err != nil {
 		if !errors.Is(err, gocui.ErrUnknownView) {
 			return err
 		}
@@ -130,90 +125,22 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 	}
 
 	if v, err := gui.View(g.views.collections); err == nil {
-		hasCommittedFilter := g.hasActiveFilter("collections")
-		isTypingFilter := g.isFilteringPanel("collections")
-		isFocused := g.currentColumn == "collections"
-
-		// Title/border color: filter color when focused AND filter is committed (not while typing)
+		g.stylePanelFrame(gui, v, "collections")
 		// Active tab always uses ActiveBorderColor (reddish) regardless of focus
 		v.SelFgColor = g.theme.ActiveBorderColor
-		if isFocused && hasCommittedFilter {
-			gui.SelFrameColor = g.theme.FilterBorderColor
-			gui.SelFgColor = g.theme.FilterBorderColor
-			v.TitleColor = g.theme.FilterBorderColor
-			v.FrameColor = g.theme.FilterBorderColor
-		} else if isFocused {
-			gui.SelFrameColor = g.theme.ActiveBorderColor
-			gui.SelFgColor = g.theme.ActiveBorderColor
-			v.TitleColor = g.theme.ActiveBorderColor
-			v.FrameColor = g.theme.ActiveBorderColor
-		} else {
-			v.TitleColor = g.theme.InactiveBorderColor
-			v.FrameColor = g.theme.InactiveBorderColor
-		}
-
-		// Sliding window of 3 tabs using gocui's built-in tab rendering
-		allTabs := []string{"Collections", "Functions", "Storage", "Auth", "Rules", "Indexes"}
-		allKeys := []string{"collections", "functions", "storage", "auth", "rules", "indexes"}
-		activeIdx := 0
-		for i, k := range allKeys {
-			if k == g.collectionsTab {
-				activeIdx = i
-				break
-			}
-		}
-		start := activeIdx - 1
-		if start < 0 {
-			start = 0
-		}
-		if start+3 > len(allTabs) {
-			start = len(allTabs) - 3
-		}
-		windowTabs := make([]string, 3)
-		for i := 0; i < 3; i++ {
-			name := allTabs[start+i]
-			if start > 0 && i == 0 {
-				name = "< " + name
-			}
-			if start+3 < len(allTabs) && i == 2 {
-				name = name + " >"
-			}
-			windowTabs[i] = name
-		}
-		v.Tabs = windowTabs
-		v.TabIndex = activeIdx - start
+		v.Tabs, v.TabIndex = collectionsTabWindow(g.collectionsTab)
 
 		switch g.collectionsTab {
 		case "functions":
-			filtered := g.getFilteredFunctions()
-			hasFilter := hasCommittedFilter || isTypingFilter
-			if hasFilter {
-				v.Footer = fmt.Sprintf("%d/%d matched", len(filtered), len(g.functions))
-			} else if len(g.functions) > 0 {
-				v.Footer = fmt.Sprintf("%d of %d", g.selectedFunctionIdx+1, len(g.functions))
-			} else {
-				v.Footer = "0 of 0"
-			}
+			v.Footer = g.listFooter(CtxFunctions, len(g.functions))
 		case "storage":
-			if g.currentBucket == "" {
-				if len(g.storageBuckets) > 0 {
-					v.Footer = fmt.Sprintf("%d of %d", g.selectedBucketIdx+1, len(g.storageBuckets))
-				} else {
-					v.Footer = "0 of 0"
-				}
-			} else {
-				if len(g.storageObjects) > 0 {
-					v.Footer = fmt.Sprintf("%d of %d", g.selectedObjectIdx+1, len(g.storageObjects))
-				} else {
-					v.Footer = "0 of 0"
-				}
+			total := len(g.storageBuckets)
+			if g.currentBucket != "" {
+				total = len(g.storageObjects)
 			}
+			v.Footer = g.listFooter(CtxStorage, total)
 		case "auth":
-			if len(g.authUsers) > 0 {
-				v.Footer = fmt.Sprintf("%d of %d", g.selectedAuthIdx+1, len(g.authUsers))
-			} else {
-				v.Footer = "0 of 0"
-			}
+			v.Footer = g.listFooter(CtxAuth, len(g.authUsers))
 		case "rules":
 			if g.firestoreRules != nil {
 				v.Footer = "loaded"
@@ -221,23 +148,17 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 				v.Footer = ""
 			}
 		case "indexes":
-			if len(g.firestoreIndexes) > 0 {
-				v.Footer = fmt.Sprintf("%d indexes", len(g.firestoreIndexes))
-			} else {
-				v.Footer = "0 indexes"
-			}
+			v.Footer = fmt.Sprintf("%d indexes", len(g.firestoreIndexes))
 		default: // collections
-			filtered := g.getFilteredCollections()
-			hasFilter := hasCommittedFilter || isTypingFilter
-			if hasFilter {
-				v.Footer = fmt.Sprintf("%d/%d matched", len(filtered), len(g.collections))
-			} else if len(g.collections) > 0 {
-				v.Footer = fmt.Sprintf("%d of %d", g.selectedCollectionIdx+1, len(g.collections))
-			} else {
-				v.Footer = "0 of 0"
-			}
+			v.Footer = g.listFooter(CtxCollections, len(g.collections))
 		}
 		g.updateCollectionsView(v)
+
+		// Rules and indexes are plain text that scrolls instead of a list
+		if g.collectionsTab == "rules" || g.collectionsTab == "indexes" {
+			g.collectionsScrollPos = max(0, min(g.collectionsScrollPos, v.ViewLinesHeight()-v.InnerHeight()))
+			v.SetOrigin(0, g.collectionsScrollPos)
+		}
 	}
 
 	// Tree panel (bottom-left)
@@ -255,41 +176,14 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 	}
 
 	if v, err := gui.View(g.views.tree); err == nil {
-		hasCommittedFilter := g.hasActiveFilter("tree")
-		isTypingFilter := g.isFilteringPanel("tree")
-		isFocused := g.currentColumn == "tree"
-
-		// Title/border color: filter color when focused AND filter is committed (not while typing)
-		if isFocused && hasCommittedFilter {
-			gui.SelFrameColor = g.theme.FilterBorderColor
-			gui.SelFgColor = g.theme.FilterBorderColor
-			v.TitleColor = g.theme.FilterBorderColor
-			v.FrameColor = g.theme.FilterBorderColor
-		} else if isFocused {
-			gui.SelFrameColor = g.theme.ActiveBorderColor
-			gui.SelFgColor = g.theme.ActiveBorderColor
-			v.TitleColor = g.theme.ActiveBorderColor
-			v.FrameColor = g.theme.ActiveBorderColor
-		} else {
-			v.TitleColor = g.theme.InactiveBorderColor
-			v.FrameColor = g.theme.InactiveBorderColor
-		}
+		g.stylePanelFrame(gui, v, "tree")
 		// Show query mode in title
 		if g.queryResultMode {
 			v.Title = " " + icons.TREE_ICON + " Query Results (Q to clear) "
 		} else {
 			v.Title = " " + icons.TREE_ICON + " Tree "
 		}
-		// Set footer with count
-		filtered := g.getFilteredTreeNodes()
-		hasFilter := hasCommittedFilter || isTypingFilter
-		if hasFilter {
-			v.Footer = fmt.Sprintf("%d/%d matched", len(filtered), len(g.treeNodes))
-		} else if len(g.treeNodes) > 0 {
-			v.Footer = fmt.Sprintf("%d of %d", g.selectedTreeIdx+1, len(g.treeNodes))
-		} else {
-			v.Footer = "0 of 0"
-		}
+		v.Footer = g.listFooter(CtxTree, len(g.treeNodes))
 		g.updateTreeView(v)
 	}
 
@@ -303,43 +197,26 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 		v.Wrap = true
 		v.BgColor = gocui.ColorDefault
 		v.FgColor = gocui.ColorDefault
-		v.SelBgColor = gocui.ColorDefault
+		v.SelBgColor = g.theme.SelectedLineBgColor
 		v.SelFgColor = gocui.ColorDefault
 		v.FrameRunes = g.roundedFrameRunes
 	}
 
 	if v, err := gui.View(g.views.details); err == nil {
-		hasCommittedFilter := g.hasActiveFilter("details")
-		isFocused := g.currentColumn == "details"
-
-		// Title/border color
+		g.stylePanelFrame(gui, v, "details")
 		// Active tab always uses ActiveBorderColor regardless of focus
 		v.SelFgColor = g.theme.ActiveBorderColor
-		if isFocused && hasCommittedFilter {
-			gui.SelFrameColor = g.theme.FilterBorderColor
-			gui.SelFgColor = g.theme.FilterBorderColor
-			v.TitleColor = g.theme.FilterBorderColor
-			v.FrameColor = g.theme.FilterBorderColor
-		} else if isFocused {
-			gui.SelFrameColor = g.theme.ActiveBorderColor
-			gui.SelFgColor = g.theme.ActiveBorderColor
-			v.TitleColor = g.theme.ActiveBorderColor
-			v.FrameColor = g.theme.ActiveBorderColor
-		} else {
-			v.TitleColor = g.theme.InactiveBorderColor
-			v.FrameColor = g.theme.InactiveBorderColor
-		}
 
-		// Show active tab in title when Functions tab is active
-		if g.collectionsTab == "functions" && (g.currentColumn == "collections" || (g.currentColumn == "details" && g.previousColumn == "collections")) {
-			v.Tabs = nil
+		// Function details have Details and Logs tabs
+		if g.detailsSource() == "function" {
+			v.Tabs = []string{"Details", "Logs"}
+			v.TabIndex = 0
 			if g.detailsTab == "logs" {
-				v.Title = " Logs [/] "
-			} else {
-				v.Title = " Details [/] "
+				v.TabIndex = 1
 			}
 		} else {
 			v.Tabs = nil
+			v.Title = " " + icons.DETAILS_ICON + " Details "
 			// Only reset detailsTab when on Tree or Projects (not when switching to Collections tab)
 			if g.currentColumn == "tree" || g.currentColumn == "projects" {
 				g.detailsTab = "details"
@@ -347,7 +224,15 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 		}
 
 		g.updateDetailsView(v)
+
+		// Keep scroll and cursor inside the content, then draw the cursor line
+		g.detailsViewHeight = v.InnerHeight()
+		g.detailsLineCount = v.ViewLinesHeight()
+		g.detailsScrollPos = max(0, min(g.detailsScrollPos, g.maxDetailsScroll()))
+		g.detailsCursor = max(g.detailsScrollPos, min(g.detailsCursor, g.detailsScrollPos+g.detailsViewHeight-1, g.detailsLineCount-1))
 		v.SetOrigin(0, g.detailsScrollPos)
+		v.Highlight = g.currentColumn == "details" && g.detailsLineCount > 0
+		v.SetCursor(0, g.detailsCursor-g.detailsScrollPos)
 	}
 
 	// Commands panel (bottom-right, single row)
@@ -368,7 +253,7 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 		g.updateCommandsView(v)
 	}
 
-	// Help bar (bottom, full width)
+	// Options bar (bottom, full width)
 	if v, err := gui.SetView(g.views.help, 0, maxY-2, maxX-1, maxY, 0); err != nil {
 		if !errors.Is(err, gocui.ErrUnknownView) {
 			return err
@@ -384,247 +269,334 @@ func (g *Gui) Layout(gui *gocui.Gui) error {
 		g.updateHelpView(v)
 	}
 
-	// Query builder modal
-	// Confirm dialog
-	if g.confirmOpen {
-		modalWidth := 50
-		modalHeight := 10
-		modalX := (maxX - modalWidth) / 2
-		modalY := (maxY - modalHeight) / 2
+	if err := g.layoutFilterPrompt(gui, maxX, maxY); err != nil {
+		return err
+	}
 
-		if v, err := gui.SetView(g.views.confirm, modalX, modalY, modalX+modalWidth, modalY+modalHeight, 0); err != nil {
-			if !errors.Is(err, gocui.ErrUnknownView) {
-				return err
-			}
-			v.Title = " " + g.confirmTitle + " "
-			v.TitleColor = g.theme.ActiveBorderColor
-			v.FrameColor = g.theme.ActiveBorderColor
-			v.FrameRunes = g.roundedFrameRunes
-			v.BgColor = gocui.ColorDefault
-			v.FgColor = gocui.ColorDefault
+	// Popups. Each exists only while open, so a newly opened one is created
+	// last and drawn on top.
+	if err := g.layoutCommandLog(gui, maxX, maxY); err != nil {
+		return err
+	}
+	if err := g.layoutHelpMenu(gui, maxX, maxY); err != nil {
+		return err
+	}
+	if err := g.layoutQueryModal(gui, maxX, maxY); err != nil {
+		return err
+	}
+	if err := g.layoutConfirm(gui, maxX, maxY); err != nil {
+		return err
+	}
+
+	// Focus the view of the current context; show the terminal cursor only
+	// while typing
+	viewName := g.contextView(g.currentContext())
+	if _, err := gui.SetCurrentView(viewName); err != nil {
+		return fmt.Errorf("failed to set current view '%s': %w", viewName, err)
+	}
+	gui.Cursor = viewName == g.views.filterInput || viewName == g.views.queryInput
+
+	return nil
+}
+
+// stylePanelFrame colors a panel's frame: the focused panel uses the active
+// color, or the filter color while it has a filter applied
+func (g *Gui) stylePanelFrame(gui *gocui.Gui, v *gocui.View, column string) {
+	if g.currentColumn != column {
+		v.TitleColor = g.theme.InactiveBorderColor
+		v.FrameColor = g.theme.InactiveBorderColor
+		return
+	}
+	color := g.theme.ActiveBorderColor
+	if g.getCommittedFilter(g.panelContext(column)) != "" {
+		color = g.theme.FilterBorderColor
+	}
+	// gocui draws the focused view's frame with the global SelFrameColor
+	gui.SelFrameColor = color
+	gui.SelFgColor = color
+	v.TitleColor = color
+	v.FrameColor = color
+}
+
+// listFooter shows "3 of 20", or "5/20 matched" while a filter applies
+func (g *Gui) listFooter(ctx Context, total int) string {
+	sel, n := g.listState(ctx)
+	if g.activeFilter(ctx) != "" {
+		return fmt.Sprintf("%d/%d matched", n, total)
+	}
+	if sel == nil || n == 0 {
+		return "0 of 0"
+	}
+	return fmt.Sprintf("%d of %d", min(*sel, n-1)+1, n)
+}
+
+var collectionsTabTitles = []string{"Collections", "Functions", "Storage", "Auth", "Rules", "Indexes"}
+
+// collectionsTabWindowStart returns the first of the three tabs shown around
+// the active one, since the panel is too narrow for all six
+func collectionsTabWindowStart(activeTab string) int {
+	activeIdx := 0
+	for i, t := range collectionsTabs {
+		if t == activeTab {
+			activeIdx = i
+			break
 		}
+	}
+	return max(0, min(activeIdx-1, len(collectionsTabs)-3))
+}
 
-		if v, err := gui.View(g.views.confirm); err == nil {
-			v.Clear()
-			v.Title = " " + g.confirmTitle + " "
-			fmt.Fprintln(v, "")
-			for _, line := range strings.Split(g.confirmMessage, "\n") {
-				fmt.Fprintf(v, "  %s\n", line)
-			}
-			fmt.Fprintln(v, "")
-			fmt.Fprintln(v, "  \033[32mEnter\033[0m confirm    \033[31mEsc\033[0m cancel")
-			if _, err := gui.SetCurrentView(g.views.confirm); err != nil {
-				return fmt.Errorf("failed to set confirm view: %w", err)
-			}
+// collectionsTabWindow returns the visible tab titles, with arrows hinting at
+// hidden tabs, and the index of the active one among them
+func collectionsTabWindow(activeTab string) ([]string, int) {
+	start := collectionsTabWindowStart(activeTab)
+	tabs := make([]string, 3)
+	activeIdx := 0
+	for i := range tabs {
+		name := collectionsTabTitles[start+i]
+		if start > 0 && i == 0 {
+			name = "< " + name
 		}
+		if start+3 < len(collectionsTabTitles) && i == 2 {
+			name = name + " >"
+		}
+		tabs[i] = name
+		if collectionsTabs[start+i] == activeTab {
+			activeIdx = i
+		}
+	}
+	return tabs, activeIdx
+}
 
+// layoutFilterPrompt shows the filter input on the bottom line while typing
+func (g *Gui) layoutFilterPrompt(gui *gocui.Gui, maxX, maxY int) error {
+	if !g.filterInputActive {
+		_ = gui.DeleteView(g.views.filterPrefix)
+		_ = gui.DeleteView(g.views.filterInput)
 		return nil
 	}
-	_ = gui.DeleteView(g.views.confirm)
 
-	if g.queryModalOpen {
-		modalWidth := 50
-		modalHeight := 20
-		if modalHeight > maxY-4 {
-			modalHeight = maxY - 4
+	prefix := fmt.Sprintf("Filter %s: ", g.getContextName(g.filterInputPanel))
+	if g.filterInputPanel == CtxDetails {
+		prefix = "Filter Details (text, or jq starting with .): "
+	}
+	// Frameless views draw from x0+1, so the input starts right after the prefix
+	prefixEnd := len([]rune(prefix)) + 1
+	if v, err := gui.SetView(g.views.filterPrefix, 0, maxY-2, prefixEnd, maxY, 0); err != nil {
+		if !errors.Is(err, gocui.ErrUnknownView) {
+			return err
 		}
-		modalX := (maxX - modalWidth) / 2
-		modalY := (maxY - modalHeight) / 2
+		v.Frame = false
+	}
+	if v, err := gui.View(g.views.filterPrefix); err == nil {
+		v.Clear()
+		fmt.Fprintf(v, "\033[33m%s\033[0m", prefix)
+	}
 
-		if v, err := gui.SetView(g.views.queryModal, modalX, modalY, modalX+modalWidth, modalY+modalHeight, 0); err != nil {
-			if !errors.Is(err, gocui.ErrUnknownView) {
-				return err
-			}
-			v.Title = " Query Builder "
-			v.TitleColor = g.theme.ActiveBorderColor
-			v.FrameColor = g.theme.ActiveBorderColor
-			v.FrameRunes = g.roundedFrameRunes
-			v.BgColor = gocui.ColorDefault
-			v.FgColor = gocui.ColorDefault
+	if v, err := gui.SetView(g.views.filterInput, prefixEnd-1, maxY-2, maxX, maxY, 0); err != nil {
+		if !errors.Is(err, gocui.ErrUnknownView) {
+			return err
 		}
+		v.Frame = false
+		v.Editable = true
+		v.Editor = gocui.EditorFunc(g.filterEditor)
+	}
+	return nil
+}
 
-		if v, err := gui.View(g.views.queryModal); err == nil {
-			g.renderQueryModal(v)
-		}
-
-		// Create editable input view when in edit mode
-		if g.queryEditMode {
-			inputX := modalX + 2
-			inputY := modalY + modalHeight - 4
-			inputWidth := modalWidth - 4
-
-			if v, err := gui.SetView(g.views.queryInput, inputX, inputY, inputX+inputWidth, inputY+2, 0); err != nil {
-				if !errors.Is(err, gocui.ErrUnknownView) {
-					return err
-				}
-				v.Title = " " + g.getQueryEditFieldName() + " "
-				v.TitleColor = g.theme.ActiveBorderColor
-				v.FrameColor = g.theme.ActiveBorderColor
-				v.FrameRunes = g.roundedFrameRunes
-				v.Editable = true
-				v.Editor = gocui.EditorFunc(g.queryInputEditor)
-				// Initialize TextArea with current value
-				v.TextArea.Clear()
-				v.TextArea.TypeString(g.queryEditBuffer)
-				v.RenderTextArea()
-			}
-
-			if v, err := gui.View(g.views.queryInput); err == nil {
-				v.Title = " " + g.getQueryEditFieldName() + " "
-				gui.Cursor = true // Show cursor when editing
-				if _, err := gui.SetCurrentView(g.views.queryInput); err != nil {
-					return fmt.Errorf("failed to set query input view: %w", err)
-				}
-			}
-		} else {
-			gui.Cursor = false // Hide cursor when not editing
-			_ = gui.DeleteView(g.views.queryInput)
-		}
-
-		// Create select popup when selecting operator/type
-		if g.querySelectOpen {
-			selectWidth := 20
-			selectHeight := len(g.querySelectItems) + 2
-			if selectHeight > 12 {
-				selectHeight = 12
-			}
-			selectX := modalX + (modalWidth-selectWidth)/2
-			selectY := modalY + 4
-
-			if v, err := gui.SetView(g.views.querySelect, selectX, selectY, selectX+selectWidth, selectY+selectHeight, 0); err != nil {
-				if !errors.Is(err, gocui.ErrUnknownView) {
-					return err
-				}
-				v.Title = " Select "
-				v.TitleColor = g.theme.ActiveBorderColor
-				v.FrameColor = g.theme.ActiveBorderColor
-				v.FrameRunes = g.roundedFrameRunes
-				v.Highlight = true
-				v.SelBgColor = g.theme.SelectedLineBgColor
-				v.SelFgColor = gocui.ColorDefault
-			}
-
-			if v, err := gui.View(g.views.querySelect); err == nil {
-				g.renderQuerySelect(v)
-				if _, err := gui.SetCurrentView(g.views.querySelect); err != nil {
-					return fmt.Errorf("failed to set query select view: %w", err)
-				}
-			}
-		} else {
-			_ = gui.DeleteView(g.views.querySelect)
-			if !g.queryEditMode {
-				if _, err := gui.SetCurrentView(g.views.queryModal); err != nil {
-					return fmt.Errorf("failed to set query view: %w", err)
-				}
-			}
-		}
-
+// layoutCommandLog shows the command log popup
+func (g *Gui) layoutCommandLog(gui *gocui.Gui, maxX, maxY int) error {
+	if !g.modalOpen {
+		_ = gui.DeleteView(g.views.modal)
 		return nil
-	} else {
+	}
+	modalWidth := maxX - 10
+	modalHeight := min(15, maxY-6)
+	modalX := (maxX - modalWidth) / 2
+	modalY := (maxY - modalHeight) / 2
+
+	if v, err := gui.SetView(g.views.modal, modalX, modalY, modalX+modalWidth, modalY+modalHeight, 0); err != nil {
+		if !errors.Is(err, gocui.ErrUnknownView) {
+			return err
+		}
+		v.Title = " Command Log "
+		v.TitleColor = g.theme.ActiveBorderColor
+		v.FrameColor = g.theme.ActiveBorderColor
+		v.FrameRunes = g.roundedFrameRunes
+		v.BgColor = gocui.ColorDefault
+		v.FgColor = gocui.ColorDefault
+		v.SelBgColor = gocui.ColorDefault
+		v.SelFgColor = gocui.ColorDefault
+		v.Wrap = true
+	}
+
+	if v, err := gui.View(g.views.modal); err == nil {
+		v.Clear()
+		if len(g.commandHistory) == 0 {
+			fmt.Fprintln(v, "  No commands yet")
+		} else {
+			for _, cmd := range g.commandHistory {
+				statusColor := "\033[32m" // Green
+				switch cmd.Status {
+				case "error":
+					statusColor = "\033[31m" // Red
+				case "running":
+					statusColor = "\033[33m" // Yellow
+				}
+				fmt.Fprintf(v, "  [%s] %s%s\033[0m: %s\n", cmd.Timestamp, statusColor, cmd.Command, cmd.Description)
+			}
+		}
+		fmt.Fprintln(v, "")
+		fmt.Fprintln(v, "  \033[36mPress Esc or @ to close\033[0m")
+	}
+	return nil
+}
+
+// layoutHelpMenu shows the keybindings menu, sized to its content
+func (g *Gui) layoutHelpMenu(gui *gocui.Gui, maxX, maxY int) error {
+	if !g.helpOpen || g.helpPopup == nil {
+		_ = gui.DeleteView(g.views.helpModal)
+		return nil
+	}
+	modalWidth := min(64, maxX-4)
+	modalHeight := max(3, min(g.helpPopup.LineCount()+1, maxY-4))
+	modalX := (maxX - modalWidth) / 2
+	modalY := (maxY - modalHeight) / 2
+
+	if v, err := gui.SetView(g.views.helpModal, modalX, modalY, modalX+modalWidth, modalY+modalHeight, 0); err != nil {
+		if !errors.Is(err, gocui.ErrUnknownView) {
+			return err
+		}
+		v.Title = " " + icons.KEYBOARD_ICON + " " + g.helpPopup.Title + " "
+		v.TitleColor = g.theme.ActiveBorderColor
+		v.FrameColor = g.theme.ActiveBorderColor
+		v.FrameRunes = g.roundedFrameRunes
+	}
+
+	if v, err := gui.View(g.views.helpModal); err == nil {
+		g.renderHelpContent(v)
+	}
+	return nil
+}
+
+// layoutQueryModal shows the query builder with its input and select popups
+func (g *Gui) layoutQueryModal(gui *gocui.Gui, maxX, maxY int) error {
+	if !g.queryModalOpen {
 		_ = gui.DeleteView(g.views.queryModal)
 		_ = gui.DeleteView(g.views.queryInput)
 		_ = gui.DeleteView(g.views.querySelect)
+		return nil
 	}
 
-	// Help modal (keyboard shortcuts)
-	if g.helpOpen {
-		modalWidth := 50
-		modalHeight := 22
-		if modalHeight > maxY-4 {
-			modalHeight = maxY - 4
-		}
-		modalX := (maxX - modalWidth) / 2
-		modalY := (maxY - modalHeight) / 2
+	modalWidth := 50
+	modalHeight := min(20, maxY-4)
+	modalX := (maxX - modalWidth) / 2
+	modalY := (maxY - modalHeight) / 2
 
-		if v, err := gui.SetView(g.views.helpModal, modalX, modalY, modalX+modalWidth, modalY+modalHeight, 0); err != nil {
+	if v, err := gui.SetView(g.views.queryModal, modalX, modalY, modalX+modalWidth, modalY+modalHeight, 0); err != nil {
+		if !errors.Is(err, gocui.ErrUnknownView) {
+			return err
+		}
+		v.Title = " Query Builder "
+		v.TitleColor = g.theme.ActiveBorderColor
+		v.FrameColor = g.theme.ActiveBorderColor
+		v.FrameRunes = g.roundedFrameRunes
+		v.BgColor = gocui.ColorDefault
+		v.FgColor = gocui.ColorDefault
+	}
+
+	if v, err := gui.View(g.views.queryModal); err == nil {
+		g.renderQueryModal(v)
+	}
+
+	// Create editable input view when in edit mode
+	if g.queryEditMode {
+		inputX := modalX + 2
+		inputY := modalY + modalHeight - 4
+		inputWidth := modalWidth - 4
+
+		if v, err := gui.SetView(g.views.queryInput, inputX, inputY, inputX+inputWidth, inputY+2, 0); err != nil {
 			if !errors.Is(err, gocui.ErrUnknownView) {
 				return err
 			}
-			v.Title = " " + icons.KEYBOARD_ICON + " Keyboard Shortcuts "
 			v.TitleColor = g.theme.ActiveBorderColor
 			v.FrameColor = g.theme.ActiveBorderColor
 			v.FrameRunes = g.roundedFrameRunes
+			v.Editable = true
+			v.Editor = gocui.EditorFunc(g.queryInputEditor)
+			// Initialize TextArea with current value
+			v.TextArea.Clear()
+			v.TextArea.TypeString(g.queryEditBuffer)
+			v.RenderTextArea()
+		}
+
+		if v, err := gui.View(g.views.queryInput); err == nil {
+			v.Title = " " + g.getQueryEditFieldName() + " "
+		}
+	} else {
+		_ = gui.DeleteView(g.views.queryInput)
+	}
+
+	// Create select popup when selecting operator/type
+	if g.querySelectOpen {
+		selectWidth := 20
+		selectHeight := min(len(g.querySelectItems)+2, 12)
+		selectX := modalX + (modalWidth-selectWidth)/2
+		selectY := modalY + 4
+
+		if v, err := gui.SetView(g.views.querySelect, selectX, selectY, selectX+selectWidth, selectY+selectHeight, 0); err != nil {
+			if !errors.Is(err, gocui.ErrUnknownView) {
+				return err
+			}
+			v.Title = " Select "
+			v.TitleColor = g.theme.ActiveBorderColor
+			v.FrameColor = g.theme.ActiveBorderColor
+			v.FrameRunes = g.roundedFrameRunes
+			v.Highlight = true
 			v.SelBgColor = g.theme.SelectedLineBgColor
 			v.SelFgColor = gocui.ColorDefault
 		}
 
-		if v, err := gui.View(g.views.helpModal); err == nil {
-			g.renderHelpContent(v)
-			if _, err := gui.SetCurrentView(g.views.helpModal); err != nil {
-				return fmt.Errorf("failed to set help view: %w", err)
-			}
+		if v, err := gui.View(g.views.querySelect); err == nil {
+			g.renderQuerySelect(v)
 		}
-
-		return nil
 	} else {
-		_ = gui.DeleteView(g.views.helpModal)
+		_ = gui.DeleteView(g.views.querySelect)
 	}
+	return nil
+}
 
-	// Modal (centered popup for command logs)
-	if g.modalOpen {
-		modalWidth := maxX - 10
-		modalHeight := 15
-		if modalHeight > maxY-6 {
-			modalHeight = maxY - 6
-		}
-		modalX := (maxX - modalWidth) / 2
-		modalY := (maxY - modalHeight) / 2
-
-		if v, err := gui.SetView(g.views.modal, modalX, modalY, modalX+modalWidth, modalY+modalHeight, 0); err != nil {
-			if !errors.Is(err, gocui.ErrUnknownView) {
-				return err
-			}
-			v.Title = " Command Log "
-			v.BgColor = gocui.ColorDefault
-			v.FgColor = gocui.ColorDefault
-			v.SelBgColor = gocui.ColorDefault
-			v.SelFgColor = gocui.ColorDefault
-			v.Wrap = true
-		}
-
-		if v, err := gui.View(g.views.modal); err == nil {
-			v.Clear()
-			if len(g.commandHistory) == 0 {
-				fmt.Fprintln(v, "  No commands yet")
-			} else {
-				for _, cmd := range g.commandHistory {
-					statusColor := "\033[32m" // Green
-					switch cmd.Status {
-					case "error":
-						statusColor = "\033[31m" // Red
-					case "running":
-						statusColor = "\033[33m" // Yellow
-					}
-					fmt.Fprintf(v, "  [%s] %s%s\033[0m: %s\n", cmd.Timestamp, statusColor, cmd.Command, cmd.Description)
-				}
-			}
-			fmt.Fprintln(v, "")
-			fmt.Fprintln(v, "  \033[36mPress Esc or @ to close\033[0m")
-			if _, err := gui.SetCurrentView(g.views.modal); err != nil {
-				return fmt.Errorf("failed to set modal view: %w", err)
-			}
-		}
-
+// layoutConfirm shows the confirm dialog
+func (g *Gui) layoutConfirm(gui *gocui.Gui, maxX, maxY int) error {
+	if !g.confirmOpen {
+		_ = gui.DeleteView(g.views.confirm)
 		return nil
-	} else {
-		// Delete modal if it exists
-		_ = gui.DeleteView(g.views.modal)
+	}
+	modalWidth := 50
+	modalHeight := 10
+	modalX := (maxX - modalWidth) / 2
+	modalY := (maxY - modalHeight) / 2
+
+	if v, err := gui.SetView(g.views.confirm, modalX, modalY, modalX+modalWidth, modalY+modalHeight, 0); err != nil {
+		if !errors.Is(err, gocui.ErrUnknownView) {
+			return err
+		}
+		v.TitleColor = g.theme.ActiveBorderColor
+		v.FrameColor = g.theme.ActiveBorderColor
+		v.FrameRunes = g.roundedFrameRunes
+		v.BgColor = gocui.ColorDefault
+		v.FgColor = gocui.ColorDefault
 	}
 
-	// Set current view
-	viewName := g.views.projects
-	switch g.currentColumn {
-	case "collections":
-		viewName = g.views.collections
-	case "tree":
-		viewName = g.views.tree
-	case "details":
-		viewName = g.views.details
+	if v, err := gui.View(g.views.confirm); err == nil {
+		v.Clear()
+		v.Title = " " + g.confirmTitle + " "
+		fmt.Fprintln(v, "")
+		for _, line := range strings.Split(g.confirmMessage, "\n") {
+			fmt.Fprintf(v, "  %s\n", line)
+		}
+		fmt.Fprintln(v, "")
+		fmt.Fprintln(v, "  \033[32mEnter\033[0m confirm    \033[31mEsc\033[0m cancel")
 	}
-	if _, err := gui.SetCurrentView(viewName); err != nil {
-		return fmt.Errorf("failed to set current view '%s': %w", viewName, err)
-	}
-
 	return nil
 }
 
@@ -649,16 +621,27 @@ func (g *Gui) updateProjectsView(v *gocui.View) {
 		icon = "\033[38;5;208m" + icon + "\033[0m " // Orange Firebase icon
 	}
 
-	// When collapsed (not focused), show only the selected project
+	// When collapsed (not focused), show only the active project
 	if g.currentColumn != "projects" {
-		if len(filtered) > 0 && g.selectedProjectIndex < len(filtered) {
-			project := filtered[g.selectedProjectIndex]
-			fmt.Fprintf(v, "%s*\033[0m %s%s", g.getActiveColorCode(), icon, project.DisplayName)
+		if g.currentProject == "" {
+			fmt.Fprint(v, "\033[90m  No project selected\033[0m")
+			return
 		}
+		name := g.currentProject
+		for _, project := range g.projects {
+			if project.ID == g.currentProject {
+				name = project.DisplayName
+				break
+			}
+		}
+		fmt.Fprintf(v, "%s*\033[0m %s%s", g.getActiveColorCode(), icon, name)
 		return
 	}
 
 	// Expanded view - show filtered projects
+	if len(filtered) == 0 && len(g.projects) > 0 {
+		fmt.Fprint(v, "\033[90mNo matches\033[0m")
+	}
 	for _, project := range filtered {
 		if project.ID == g.currentProject {
 			fmt.Fprintf(v, "%s*\033[0m %s%s\n", g.getActiveColorCode(), icon, project.DisplayName)
@@ -677,6 +660,64 @@ func (g *Gui) updateProjectsView(v *gocui.View) {
 	}
 }
 
+
+func (g *Gui) updateDatabasesView(v *gocui.View) {
+	v.Clear()
+	dimColor := "\033[90m"
+	resetColor := "\033[0m"
+	icon := icons.DATABASE_ICON
+	if icon != "" {
+		icon = "\033[36m" + icon + resetColor + " "
+	}
+
+	// When collapsed (not focused), show only the active database
+	if g.currentColumn != "databases" {
+		v.Highlight = false
+		if g.currentProject == "" {
+			fmt.Fprintf(v, "%s  No project selected%s", dimColor, resetColor)
+			return
+		}
+		fmt.Fprintf(v, "%s*%s %s%s", g.getActiveColorCode(), resetColor, icon, g.currentDatabase)
+		return
+	}
+
+	if g.databasesLoading {
+		v.Highlight = false
+		fmt.Fprint(v, g.getLoadingText("Loading databases..."))
+		return
+	}
+
+	databases := g.getFilteredDatabases()
+	v.Highlight = len(databases) > 0
+	if len(databases) == 0 {
+		switch {
+		case g.currentProject == "":
+			fmt.Fprintf(v, "%sSelect a project first%s", dimColor, resetColor)
+		case len(g.databases) > 0:
+			fmt.Fprintf(v, "%sNo matches%s", dimColor, resetColor)
+		}
+		return
+	}
+
+	for _, db := range databases {
+		marker := "  "
+		if db.ID == g.currentDatabase {
+			marker = g.getActiveColorCode() + "* " + resetColor
+		}
+		info := db.LocationID
+		if db.Type == "DATASTORE_MODE" {
+			info += ", datastore mode"
+		}
+		if info != "" {
+			info = fmt.Sprintf(" %s(%s)%s", dimColor, info, resetColor)
+		}
+		fmt.Fprintf(v, "%s%s%s%s\n", marker, icon, db.ID, info)
+	}
+	if g.selectedDatabaseIdx >= len(databases) {
+		g.selectedDatabaseIdx = len(databases) - 1
+	}
+	v.FocusPoint(0, g.selectedDatabaseIdx, true)
+}
 
 func (g *Gui) updateCollectionsView(v *gocui.View) {
 	v.Clear()
@@ -712,6 +753,9 @@ func (g *Gui) renderCollectionsContent(v *gocui.View) {
 	v.Highlight = g.currentColumn == "collections" && len(filtered) > 0
 
 	if len(filtered) == 0 {
+		if len(g.collections) > 0 {
+			fmt.Fprint(v, "\033[90mNo matches\033[0m")
+		}
 		return
 	}
 
@@ -756,7 +800,11 @@ func (g *Gui) renderFunctionsContent(v *gocui.View) {
 	v.Highlight = g.currentColumn == "collections" && len(filtered) > 0
 
 	if len(filtered) == 0 {
-		fmt.Fprint(v, "\033[90mNo functions deployed\033[0m")
+		if len(g.functions) > 0 {
+			fmt.Fprint(v, "\033[90mNo matches\033[0m")
+		} else {
+			fmt.Fprint(v, "\033[90mNo functions deployed\033[0m")
+		}
 		return
 	}
 
@@ -816,32 +864,40 @@ func (g *Gui) renderStorageContent(v *gocui.View) {
 
 	if g.currentBucket == "" {
 		// Show bucket list
-		v.Highlight = isFocused && len(g.storageBuckets) > 0
-		if len(g.storageBuckets) == 0 {
-			fmt.Fprintf(v, "%sNo storage buckets found%s", dimColor, resetColor)
+		buckets := g.getFilteredBuckets()
+		v.Highlight = isFocused && len(buckets) > 0
+		if len(buckets) == 0 {
+			if len(g.storageBuckets) == 0 {
+				fmt.Fprintf(v, "%sNo storage buckets found%s", dimColor, resetColor)
+			} else {
+				fmt.Fprintf(v, "%sNo matching buckets%s", dimColor, resetColor)
+			}
 			return
 		}
-		for i, b := range g.storageBuckets {
+		for i, b := range buckets {
 			marker := "  "
 			if i == g.selectedBucketIdx {
 				marker = activeColor + "* " + resetColor
 			}
 			fmt.Fprintf(v, "%s📦 %s %s(%s, %s)%s\n", marker, b.Name, dimColor, b.Location, b.StorageClass, resetColor)
 		}
-		if len(g.storageBuckets) > 0 {
-			if g.selectedBucketIdx >= len(g.storageBuckets) {
-				g.selectedBucketIdx = len(g.storageBuckets) - 1
-			}
-			v.FocusPoint(0, g.selectedBucketIdx, true)
+		if g.selectedBucketIdx >= len(buckets) {
+			g.selectedBucketIdx = len(buckets) - 1
 		}
+		v.FocusPoint(0, g.selectedBucketIdx, true)
 	} else {
 		// Show objects in current bucket/prefix
-		v.Highlight = isFocused && len(g.storageObjects) > 0
-		if len(g.storageObjects) == 0 {
-			fmt.Fprintf(v, "%sEmpty%s", dimColor, resetColor)
+		objects := g.getFilteredObjects()
+		v.Highlight = isFocused && len(objects) > 0
+		if len(objects) == 0 {
+			if len(g.storageObjects) == 0 {
+				fmt.Fprintf(v, "%sEmpty%s", dimColor, resetColor)
+			} else {
+				fmt.Fprintf(v, "%sNo matching objects%s", dimColor, resetColor)
+			}
 			return
 		}
-		for i, o := range g.storageObjects {
+		for i, o := range objects {
 			marker := "  "
 			if i == g.selectedObjectIdx {
 				marker = activeColor + "* " + resetColor
@@ -853,12 +909,10 @@ func (g *Gui) renderStorageContent(v *gocui.View) {
 				fmt.Fprintf(v, "%s📄 %s %s(%s, %s)%s\n", marker, o.DisplayName, dimColor, sizeStr, o.ContentType, resetColor)
 			}
 		}
-		if len(g.storageObjects) > 0 {
-			if g.selectedObjectIdx >= len(g.storageObjects) {
-				g.selectedObjectIdx = len(g.storageObjects) - 1
-			}
-			v.FocusPoint(0, g.selectedObjectIdx, true)
+		if g.selectedObjectIdx >= len(objects) {
+			g.selectedObjectIdx = len(objects) - 1
 		}
+		v.FocusPoint(0, g.selectedObjectIdx, true)
 	}
 }
 
@@ -874,13 +928,18 @@ func (g *Gui) renderAuthContent(v *gocui.View) {
 	resetColor := "\033[0m"
 	activeColor := g.getActiveColorCode()
 
-	v.Highlight = isFocused && len(g.authUsers) > 0
-	if len(g.authUsers) == 0 {
-		fmt.Fprintf(v, "%sNo users found%s", dimColor, resetColor)
+	users := g.getFilteredAuthUsers()
+	v.Highlight = isFocused && len(users) > 0
+	if len(users) == 0 {
+		if len(g.authUsers) == 0 {
+			fmt.Fprintf(v, "%sNo users found%s", dimColor, resetColor)
+		} else {
+			fmt.Fprintf(v, "%sNo matching users%s", dimColor, resetColor)
+		}
 		return
 	}
 
-	for i, u := range g.authUsers {
+	for i, u := range users {
 		marker := "  "
 		if i == g.selectedAuthIdx {
 			marker = activeColor + "* " + resetColor
@@ -900,12 +959,10 @@ func (g *Gui) renderAuthContent(v *gocui.View) {
 		fmt.Fprintf(v, "%s👤 %s%s%s\n", marker, name, status, providers)
 	}
 
-	if len(g.authUsers) > 0 {
-		if g.selectedAuthIdx >= len(g.authUsers) {
-			g.selectedAuthIdx = len(g.authUsers) - 1
-		}
-		v.FocusPoint(0, g.selectedAuthIdx, true)
+	if g.selectedAuthIdx >= len(users) {
+		g.selectedAuthIdx = len(users) - 1
 	}
+	v.FocusPoint(0, g.selectedAuthIdx, true)
 }
 
 func (g *Gui) renderRulesContent(v *gocui.View) {
@@ -916,6 +973,11 @@ func (g *Gui) renderRulesContent(v *gocui.View) {
 	}
 
 	v.Highlight = false
+	g.writeRules(v)
+}
+
+// writeRules prints the Firestore rules with basic syntax highlighting
+func (g *Gui) writeRules(v *gocui.View) {
 	dimColor := "\033[90m"
 	resetColor := "\033[0m"
 	cyanColor := "\033[36m"
@@ -953,13 +1015,18 @@ func (g *Gui) renderIndexesContent(v *gocui.View) {
 		return
 	}
 
+	v.Highlight = false
+	g.writeIndexes(v)
+}
+
+// writeIndexes prints the composite indexes with their fields
+func (g *Gui) writeIndexes(v *gocui.View) {
 	dimColor := "\033[90m"
 	resetColor := "\033[0m"
 	cyanColor := "\033[36m"
 	greenColor := "\033[32m"
 	yellowColor := "\033[33m"
 
-	v.Highlight = false
 	if len(g.firestoreIndexes) == 0 {
 		fmt.Fprintf(v, "%sNo composite indexes found%s", dimColor, resetColor)
 		return
@@ -1125,11 +1192,12 @@ func (g *Gui) renderStorageDetails(v *gocui.View) {
 
 	if g.currentBucket == "" {
 		// Show bucket details
-		if len(g.storageBuckets) == 0 || g.selectedBucketIdx >= len(g.storageBuckets) {
+		buckets := g.getFilteredBuckets()
+		if g.selectedBucketIdx >= len(buckets) {
 			fmt.Fprintf(v, "%sSelect a bucket to view details%s", dimColor, resetColor)
 			return
 		}
-		b := g.storageBuckets[g.selectedBucketIdx]
+		b := buckets[g.selectedBucketIdx]
 		fmt.Fprintf(v, "%s─── Bucket Details ───%s\n\n", cyanColor, resetColor)
 		fmt.Fprintf(v, " %sName:%s         %s\n", dimColor, resetColor, b.Name)
 		fmt.Fprintf(v, " %sLocation:%s     %s\n", dimColor, resetColor, b.Location)
@@ -1137,11 +1205,12 @@ func (g *Gui) renderStorageDetails(v *gocui.View) {
 		fmt.Fprintf(v, " %sCreated:%s      %s\n", dimColor, resetColor, b.TimeCreated)
 	} else {
 		// Show object details
-		if len(g.storageObjects) == 0 || g.selectedObjectIdx >= len(g.storageObjects) {
+		objects := g.getFilteredObjects()
+		if g.selectedObjectIdx >= len(objects) {
 			fmt.Fprintf(v, "%sNo object selected%s", dimColor, resetColor)
 			return
 		}
-		o := g.storageObjects[g.selectedObjectIdx]
+		o := objects[g.selectedObjectIdx]
 		fmt.Fprintf(v, "%s─── Object Details ───%s\n\n", cyanColor, resetColor)
 		fmt.Fprintf(v, " %sName:%s         %s\n", dimColor, resetColor, o.Name)
 		if o.IsPrefix {
@@ -1164,12 +1233,13 @@ func (g *Gui) renderAuthDetails(v *gocui.View) {
 	resetColor := "\033[0m"
 	cyanColor := "\033[36m"
 
-	if len(g.authUsers) == 0 || g.selectedAuthIdx >= len(g.authUsers) {
+	users := g.getFilteredAuthUsers()
+	if g.selectedAuthIdx >= len(users) {
 		fmt.Fprintf(v, "%sSelect a user to view details%s", dimColor, resetColor)
 		return
 	}
 
-	u := g.authUsers[g.selectedAuthIdx]
+	u := users[g.selectedAuthIdx]
 	fmt.Fprintf(v, "%s─── User Details ───%s\n\n", cyanColor, resetColor)
 	fmt.Fprintf(v, " %sUID:%s           %s\n", dimColor, resetColor, u.UID)
 	if u.Email != "" {
@@ -1200,24 +1270,27 @@ func (g *Gui) renderRulesDetails(v *gocui.View) {
 	cyanColor := "\033[36m"
 
 	fmt.Fprintf(v, "%s─── Firestore Security Rules ───%s\n\n", cyanColor, resetColor)
-	if g.firestoreRules == nil {
-		fmt.Fprintf(v, "%sNo rules loaded. Switch to Rules tab to load.%s", dimColor, resetColor)
+	if g.rulesLoading {
+		fmt.Fprint(v, g.getLoadingText("Loading rules..."))
 		return
 	}
-	fmt.Fprintf(v, "%s%s%s", dimColor, "Rules are shown in the Rules tab panel.", resetColor)
+	if g.firestoreRules == nil {
+		fmt.Fprintf(v, "%sNo rules loaded%s", dimColor, resetColor)
+		return
+	}
+	g.writeRules(v)
 }
 
 func (g *Gui) renderIndexesDetails(v *gocui.View) {
-	dimColor := "\033[90m"
 	resetColor := "\033[0m"
 	cyanColor := "\033[36m"
 
 	fmt.Fprintf(v, "%s─── Composite Indexes ───%s\n\n", cyanColor, resetColor)
-	if len(g.firestoreIndexes) == 0 {
-		fmt.Fprintf(v, "%sNo composite indexes. Switch to Indexes tab to load.%s", dimColor, resetColor)
+	if g.indexesLoading {
+		fmt.Fprint(v, g.getLoadingText("Loading indexes..."))
 		return
 	}
-	fmt.Fprintf(v, "%s%d composite indexes loaded. View in Indexes tab.%s", dimColor, len(g.firestoreIndexes), resetColor)
+	g.writeIndexes(v)
 }
 
 func (g *Gui) updateTreeView(v *gocui.View) {
@@ -1236,6 +1309,9 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 	v.Highlight = g.currentColumn == "tree" && len(filtered) > 0
 
 	if len(filtered) == 0 {
+		if len(g.treeNodes) > 0 {
+			fmt.Fprint(v, "\033[90mNo matches\033[0m")
+		}
 		return
 	}
 
@@ -1349,80 +1425,97 @@ func (g *Gui) updateTreeView(v *gocui.View) {
 	}
 }
 
-func (g *Gui) updateDetailsView(v *gocui.View) {
-	// Scan results / progress (takes priority over everything)
-	if g.scanRunning {
-		v.Clear()
-		fmt.Fprint(v, g.getLoadingText(fmt.Sprintf("Scanning collections... %s", g.scanProgress)))
-		return
+// detailsSource names what the details panel shows. Scan results win, then
+// the collections panel tabs that have their own details, then documents.
+func (g *Gui) detailsSource() string {
+	if g.scanRunning || (g.scanResults != nil && g.currentDocData == nil) {
+		return "scan"
 	}
-	if g.scanResults != nil && g.currentDocData == nil {
+	isFromCollections := g.currentColumn == "collections" || (g.currentColumn == "details" && g.previousColumn == "collections")
+	if isFromCollections {
+		switch g.collectionsTab {
+		case "functions":
+			return "function"
+		case "storage", "auth", "rules", "indexes":
+			return g.collectionsTab
+		}
+	}
+	if g.detailsLoading {
+		return "loading"
+	}
+	if g.currentDocData != nil {
+		return "document"
+	}
+	return "info"
+}
+
+func (g *Gui) updateDetailsView(v *gocui.View) {
+	source := g.detailsSource()
+	switch source {
+	case "scan", "document":
+	default:
+		// This content replaces the cached document render, so the document
+		// must be pushed to the view again when it comes back
+		g.detailsViewDirty = true
+	}
+
+	switch source {
+	case "scan":
+		// Scan results / progress (takes priority over everything)
+		if g.scanRunning {
+			v.Clear()
+			fmt.Fprint(v, g.getLoadingText(fmt.Sprintf("Scanning collections... %s", g.scanProgress)))
+			return
+		}
 		g.renderScanResults(v)
 		return
-	}
 
-	// Determine context based on current panel (or previous if in details)
-	activeTab := g.collectionsTab
-	isFromCollections := g.currentColumn == "collections" || (g.currentColumn == "details" && g.previousColumn == "collections")
-
-	// Functions context: show function details or logs
-	if activeTab == "functions" && isFromCollections {
+	case "function":
+		// Functions context: show function details or logs
 		if g.detailsTab == "logs" {
 			g.renderFunctionLogs(v)
 			return
 		}
-		if g.currentFunction != nil {
-			v.Clear()
-			g.renderFunctionDetails(v)
+		v.Clear()
+		if g.currentFunction == nil {
+			fmt.Fprint(v, "\033[90mSelect a function to view details\033[0m")
 			return
 		}
-		v.Clear()
-		fmt.Fprint(v, "\033[90mSelect a function to view details\033[0m")
+		g.renderFunctionDetails(v)
 		return
-	}
 
-	// Storage context: show object metadata
-	if activeTab == "storage" && isFromCollections {
+	case "storage":
 		v.Clear()
 		g.renderStorageDetails(v)
 		return
-	}
 
-	// Auth context: show user details
-	if activeTab == "auth" && isFromCollections {
+	case "auth":
 		v.Clear()
 		g.renderAuthDetails(v)
 		return
-	}
 
-	// Rules context: show rules in details panel too
-	if activeTab == "rules" && isFromCollections {
+	case "rules":
 		v.Clear()
 		g.renderRulesDetails(v)
 		return
-	}
 
-	// Indexes context
-	if activeTab == "indexes" && isFromCollections {
+	case "indexes":
 		v.Clear()
 		g.renderIndexesDetails(v)
 		return
-	}
 
-	// Document/Collections context: show document data
-	// Show loading indicator when details are being loaded
-	if g.detailsLoading {
+	case "loading":
 		v.Clear()
 		fmt.Fprint(v, g.getLoadingText("Loading document..."))
 		return
-	}
 
-	// Show document data if available
-	if g.currentDocData != nil {
+	case "document":
 		// When filtering details, always re-render to apply filter
 		detailsFilter := g.getDetailsFilter()
 		if detailsFilter != "" {
 			g.renderFilteredDetails(v)
+			// The unfiltered render must be pushed again once the filter goes
+			g.detailsViewDirty = true
 			return
 		}
 
@@ -1436,8 +1529,12 @@ func (g *Gui) updateDetailsView(v *gocui.View) {
 			return
 		}
 
-		// New document - reset scroll position
-		g.detailsScrollPos = 0
+		// New document - reset scroll position. A re-render of the same
+		// document keeps it.
+		if g.cachedDetailsDocPath != g.currentDocPath {
+			g.detailsScrollPos = 0
+			g.detailsCursor = 0
+		}
 
 		// Format JSON (compact or pretty)
 		var data []byte
@@ -1517,7 +1614,6 @@ func (g *Gui) updateDetailsView(v *gocui.View) {
 
 		content.WriteString(colorized)
 
-		g.cachedDetailsLines = strings.Split(string(data), "\n")
 		g.cachedDetailsHeader = ""
 		g.cachedDetailsContent = content.String()
 		g.cachedDetailsDocPath = g.currentDocPath
@@ -1526,8 +1622,9 @@ func (g *Gui) updateDetailsView(v *gocui.View) {
 		return
 	}
 
-	// Clear cache when not showing document
-	g.clearDetailsCache()
+	// Drop the cached document render, this view shows something else
+	g.cachedDetailsContent = ""
+	g.cachedDetailsDocPath = ""
 
 	v.Clear()
 
@@ -1541,6 +1638,8 @@ func (g *Gui) updateDetailsView(v *gocui.View) {
 	switch g.currentColumn {
 	case "projects":
 		g.showProjectDetails(v)
+	case "databases":
+		g.showDatabaseDetails(v)
 	case "collections":
 		g.showCollectionDetails(v)
 	case "tree":
@@ -1601,6 +1700,33 @@ func (g *Gui) showFetchedProjectDetails(v *gocui.View) {
 	}
 
 	fmt.Fprintln(v, "\033[90m  Press Space to select project\033[0m")
+}
+
+func (g *Gui) showDatabaseDetails(v *gocui.View) {
+	databases := g.getFilteredDatabases()
+	if g.selectedDatabaseIdx >= len(databases) {
+		fmt.Fprintln(v, "\033[36m─── Databases ───\033[0m")
+		fmt.Fprintln(v, "")
+		fmt.Fprintln(v, "\033[90m  Select a project first\033[0m")
+		return
+	}
+
+	db := databases[g.selectedDatabaseIdx]
+	fmt.Fprintln(v, "\033[36m─── Database Info ───\033[0m")
+	fmt.Fprintln(v, "")
+	fmt.Fprintf(v, "  \033[33mID:\033[0m          %s\n", db.ID)
+	if db.LocationID != "" {
+		fmt.Fprintf(v, "  \033[33mLocation:\033[0m    %s\n", db.LocationID)
+	}
+	if db.Type != "" {
+		fmt.Fprintf(v, "  \033[33mType:\033[0m        %s\n", db.Type)
+	}
+	fmt.Fprintln(v, "")
+	if db.Type == "DATASTORE_MODE" {
+		fmt.Fprintln(v, "\033[90m  Datastore mode databases can't be browsed\033[0m")
+		return
+	}
+	fmt.Fprintln(v, "\033[90m  Press Space to use this database\033[0m")
 }
 
 func (g *Gui) showCollectionDetails(v *gocui.View) {
@@ -1683,6 +1809,7 @@ func (g *Gui) renderScanResults(v *gocui.View) {
 	}
 
 	g.detailsScrollPos = 0
+	g.detailsCursor = 0
 
 	var content strings.Builder
 
@@ -1751,7 +1878,6 @@ func (g *Gui) renderScanResults(v *gocui.View) {
 
 	g.cachedDetailsContent = content.String()
 	g.cachedDetailsDocPath = "__scan__"
-	g.cachedDetailsLines = nil
 	g.cachedDetailsHeader = ""
 	v.SetContent(g.cachedDetailsContent)
 	g.detailsViewDirty = false
@@ -1793,95 +1919,87 @@ func (g *Gui) updateCommandsView(v *gocui.View) {
 func (g *Gui) updateHelpView(v *gocui.View) {
 	v.Clear()
 
-	// Show filter input when typing
+	// The filter prompt covers this line while typing
 	if g.filterInputActive {
-		panelName := g.getPanelNameFor(g.filterInputPanel)
-		// Show text with cursor at correct position
-		beforeCursor := g.filterInputText[:g.filterCursorPos]
-		afterCursor := g.filterInputText[g.filterCursorPos:]
-		// Cursor shown as reverse video - highlight char at cursor or space if at end
-		var cursorChar, rest string
-		if len(afterCursor) > 0 {
-			cursorChar = string(afterCursor[0])
-			rest = afterCursor[1:]
-		} else {
-			cursorChar = " "
-			rest = ""
-		}
-		filterPrompt := fmt.Sprintf(" \033[33mFilter %s:\033[0m %s\033[7m%s\033[0m%s", panelName, beforeCursor, cursorChar, rest)
-		hints := "  \033[90m(Enter to select, Esc to cancel)\033[0m"
-		fmt.Fprintf(v, "%s%s", filterPrompt, hints)
 		return
 	}
 
-	// Show select mode status
-	if g.selectMode {
-		count := len(g.selectedDocs)
-		fmt.Fprintf(v, " \033[33m-- SELECT MODE --\033[0m  %d selected  \033[90m(j/k to extend, Space to fetch, Esc to cancel)\033[0m", count)
-		return
-	}
+	width := v.InnerWidth()
+	right := g.optionsBarRight()
+	prefix := g.optionsBarPrefix()
+	hints := g.optionsBarHints(width - g.visibleLength(prefix) - g.visibleLength(right) - 1)
+	left := prefix + hints
 
-	// Show filter status when panel has committed filter
-	if filter := g.getFilterForPanel(g.currentColumn); filter != "" {
-		panelName := g.getPanelNameFor(g.currentColumn)
-		fmt.Fprintf(v, " \033[33m%s filtered:\033[0m '%s'  \033[90m(Esc to clear filter)\033[0m", panelName, filter)
-		return
-	}
-
-	helpText := g.getContextHelpText()
-
-	// Build breadcrumb path
-	breadcrumb := g.buildBreadcrumb()
-	versionText := fmt.Sprintf("\033[90mv%s\033[0m ", g.version)
-
-	// Calculate padding to right-align breadcrumb + version
-	width, _ := v.Size()
-	helpLen := g.visibleLength(helpText)
-	rightSide := breadcrumb + "  " + versionText
-	rightLen := g.visibleLength(breadcrumb) + 2 + len(g.version) + 2
-	padding := width - helpLen - rightLen
-	if padding < 1 {
-		padding = 1
-	}
-
-	fmt.Fprintf(v, "%s%*s%s", helpText, padding, "", rightSide)
+	padding := max(1, width-g.visibleLength(left)-g.visibleLength(right))
+	fmt.Fprintf(v, "%s%*s%s", left, padding, "", right)
 }
 
-func (g *Gui) getContextHelpText() string {
-	c := "\033[36m" // cyan for keys
-	y := "\033[33m" // yellow
-	g2 := "\033[32m" // green
-	m := "\033[35m" // magenta
-	r := "\033[31m" // red
-	x := "\033[0m"  // reset
-
-	common := c + "←/→" + x + " cols  " + c + "j/k" + x + " move  " + c + "[/]" + x + " tabs  "
-
-	switch g.currentColumn {
-	case "projects":
-		return " " + common + y + "space" + x + " select  " + m + "/" + x + " filter  " + c + "S" + x + " scan  " + m + "?" + x + " help  " + r + "q" + x + " quit"
-	case "collections":
-		switch g.collectionsTab {
-		case "functions":
-			return " " + common + y + "space" + x + " select  " + m + "/" + x + " filter  " + c + "r" + x + " refresh  " + m + "?" + x + " help  " + r + "q" + x + " quit"
-		case "storage":
-			return " " + common + y + "space" + x + " open  " + c + "esc" + x + " back  " + m + "?" + x + " help  " + r + "q" + x + " quit"
-		case "auth":
-			return " " + common + y + "space" + x + " details  " + m + "?" + x + " help  " + r + "q" + x + " quit"
-		case "rules":
-			return " " + common + m + "?" + x + " help  " + r + "q" + x + " quit"
-		case "indexes":
-			return " " + common + m + "?" + x + " help  " + r + "q" + x + " quit"
-		default:
-			return " " + common + y + "space" + x + " select  " + m + "/" + x + " filter  " + y + "F" + x + " query  " + g2 + "c" + x + " copy  " + m + "?" + x + " help  " + r + "q" + x + " quit"
-		}
-	case "tree":
-		return " " + common + y + "space" + x + " expand  " + c + "enter" + x + " details  " + m + "/" + x + " filter  " + y + "F" + x + " query  " + g2 + "c" + x + " copy  " + m + "?" + x + " help  " + r + "q" + x + " quit"
-	case "details":
-		return " " + c + "j/k" + x + " scroll  " + c + "J/K" + x + " fast  " + c + "esc" + x + " back  " + c + "t" + x + " compact  " + c + "w" + x + " wrap  " + g2 + "c" + x + " copy  " + m + "/" + x + " search  " + m + "?" + x + " help  " + r + "q" + x + " quit"
-	default:
-		return " " + common + y + "space" + x + " select  " + m + "/" + x + " filter  " + m + "?" + x + " help  " + r + "q" + x + " quit"
+// optionsBarPrefix shows the active mode or filter of the focused panel
+func (g *Gui) optionsBarPrefix() string {
+	if g.selectMode {
+		return fmt.Sprintf(" \033[33m-- SELECT MODE --\033[0m %d selected  ", len(g.selectedDocs))
 	}
+	if filter := g.getCommittedFilter(g.currentContext()); filter != "" {
+		return fmt.Sprintf(" \033[33mfiltered:\033[0m %s  ", filter)
+	}
+	return " "
+}
+
+// optionsBarRight shows a toast when there is one, else the breadcrumb and version
+func (g *Gui) optionsBarRight() string {
+	if g.toastText != "" {
+		color := "\033[32m"
+		if g.toastIsError {
+			color = "\033[31m"
+		}
+		return color + g.toastText + "\033[0m "
+	}
+	return g.buildBreadcrumb() + "  " + fmt.Sprintf("\033[90mv%s\033[0m ", g.version)
+}
+
+// optionsBarHints lists the key hints of the current context that fit in
+// width: the panel's own actions first, then navigation and global keys.
+// "? help" is always kept since it leads to everything that was cut.
+func (g *Gui) optionsBarHints(width int) string {
+	ctx := g.currentContext()
+	local, nav, global := g.contextBindings(ctx)
+	if isPopupContext(ctx) {
+		global = nil // blocked while a popup has focus
+	}
+
+	var items []string
+	var helpItem string
+	seen := make(map[string]bool)
+	for _, bindings := range [][]*Binding{local, nav, global} {
+		for _, b := range bindings {
+			if b.Short == "" || seen[b.Short] || b.disabledReason() != "" {
+				continue
+			}
+			seen[b.Short] = true
+			item := fmt.Sprintf("\033[36m%s\033[0m %s", b.shortKeyLabel(), b.Short)
+			if b.Contexts == nil && b.hasKey('?') {
+				helpItem = item
+				continue
+			}
+			items = append(items, item)
+		}
+	}
+
+	const sep = "  "
+	reserved := g.visibleLength(helpItem)
+	var out strings.Builder
+	used := 0
+	for _, item := range items {
+		w := g.visibleLength(item) + len(sep)
+		if used+w+reserved > width {
+			out.WriteString("\033[90m…\033[0m" + sep)
+			break
+		}
+		out.WriteString(item + sep)
+		used += w
+	}
+	out.WriteString(helpItem)
+	return out.String()
 }
 
 // buildBreadcrumb returns a breadcrumb path showing current navigation context
@@ -1889,6 +2007,9 @@ func (g *Gui) buildBreadcrumb() string {
 	parts := []string{}
 	if g.currentProject != "" {
 		parts = append(parts, g.currentProject)
+		if g.currentDatabase != "" && g.currentDatabase != firebase.DefaultDatabase {
+			parts = append(parts, g.currentDatabase)
+		}
 	}
 
 	switch g.collectionsTab {
@@ -1902,8 +2023,8 @@ func (g *Gui) buildBreadcrumb() string {
 		}
 	case "auth":
 		parts = append(parts, "auth")
-		if g.selectedAuthIdx < len(g.authUsers) && len(g.authUsers) > 0 {
-			u := g.authUsers[g.selectedAuthIdx]
+		if users := g.getFilteredAuthUsers(); g.selectedAuthIdx < len(users) {
+			u := users[g.selectedAuthIdx]
 			if u.Email != "" {
 				parts = append(parts, u.Email)
 			} else {

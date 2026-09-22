@@ -8,24 +8,43 @@ import (
 	"github.com/marjoballabani/lazyfire/pkg/firebase"
 )
 
-// State checking helpers
-
-func (g *Gui) isModalOpen() bool {
-	return g.modalOpen || g.helpOpen || g.confirmOpen
+// setFocus focuses a panel. Entering details remembers where we came from so
+// esc/tab can return there.
+func (g *Gui) setFocus(column string) error {
+	if column == "details" && g.currentColumn != "details" {
+		g.previousColumn = g.currentColumn
+	}
+	g.currentColumn = column
+	// Databases load on first visit, like the collections panel tabs
+	if column == "databases" && g.databases == nil && g.currentProject != "" && !g.databasesLoading {
+		g.loadDatabases()
+	}
+	return g.relayout()
 }
 
-// setFocus sets the current column and updates gocui's current view
-func (g *Gui) setFocus(gui *gocui.Gui, column string) error {
-	g.currentColumn = column
-	if _, err := gui.SetCurrentView(column); err != nil {
-		return err
+// relayout applies state changes to the views right away. Needed after focus
+// changes so keys queued behind the current one reach the newly focused view.
+func (g *Gui) relayout() error {
+	if g.g == nil {
+		return nil
 	}
-	return nil
+	return g.Layout(g.g)
+}
+
+// jumpTo returns a handler that focuses a side panel
+func (g *Gui) jumpTo(column string) func() error {
+	return func() error {
+		return g.setFocus(column)
+	}
+}
+
+func (g *Gui) focusDetails() error {
+	return g.setFocus("details")
 }
 
 // Selection handlers - called by actions
 
-func (g *Gui) selectProject(gui *gocui.Gui) error {
+func (g *Gui) selectProject() error {
 	filtered := g.getFilteredProjects()
 	if g.selectedProjectIndex >= len(filtered) {
 		return nil
@@ -35,102 +54,175 @@ func (g *Gui) selectProject(gui *gocui.Gui) error {
 
 	switch g.collectionsTab {
 	case "functions":
-		g.logCommand("api", fmt.Sprintf("ListFunctions(%s) loading...", selectedProject.ID), "running")
 		g.functionsLoading = true
 	case "storage":
-		g.logCommand("api", fmt.Sprintf("ListBuckets(%s) loading...", selectedProject.ID), "running")
 		g.storageLoading = true
 	case "auth":
-		g.logCommand("api", fmt.Sprintf("ListAuthUsers(%s) loading...", selectedProject.ID), "running")
 		g.authLoading = true
 	case "rules":
-		g.logCommand("api", fmt.Sprintf("GetRules(%s) loading...", selectedProject.ID), "running")
 		g.rulesLoading = true
 	case "indexes":
-		g.logCommand("api", fmt.Sprintf("ListIndexes(%s) loading...", selectedProject.ID), "running")
 		g.indexesLoading = true
 	default:
-		g.logCommand("api", fmt.Sprintf("ListCollections(%s) loading...", selectedProject.ID), "running")
 		g.collectionsLoading = true
 	}
+	g.logCommand("api", fmt.Sprintf("SetProject(%s)...", selectedProject.ID), "running")
 
 	go func() {
-		if err := g.firebaseClient.SetCurrentProject(selectedProject.ID); err != nil {
-			g.g.Update(func(gui *gocui.Gui) error {
+		err := g.firebaseClient.SetCurrentProject(selectedProject.ID)
+		g.g.Update(func(gui *gocui.Gui) error {
+			if err != nil {
 				g.collectionsLoading = false
 				g.functionsLoading = false
+				g.storageLoading = false
+				g.authLoading = false
+				g.rulesLoading = false
+				g.indexesLoading = false
 				g.logCommand("api", fmt.Sprintf("SetProject failed: %v", err), "error")
 				return nil
-			})
-			return
-		}
-
-		g.currentProject = selectedProject.ID
-		// Clear collections state
-		g.collections = nil
-		g.treeNodes = nil
-		g.currentDocData = nil
-		g.currentDocStats = nil
-		g.currentCollection = ""
-		g.currentDocPath = ""
-		g.selectedCollectionIdx = 0
-		g.selectedTreeIdx = 0
-		g.compositeIndexCache = make(map[string]*bool)
-		// Clear functions state
-		g.stopLogsRefresh()
-		g.functions = nil
-		g.currentFunction = nil
-		g.functionLogs = nil
-		g.selectedFunctionIdx = 0
-		// Clear storage state
-		g.storageBuckets = nil
-		g.storageObjects = nil
-		g.currentBucket = ""
-		g.storagePrefix = ""
-		g.storagePrefixStack = nil
-		g.selectedBucketIdx = 0
-		g.selectedObjectIdx = 0
-		// Clear auth state
-		g.authUsers = nil
-		g.selectedAuthIdx = 0
-		// Clear rules/indexes state
-		g.firestoreRules = nil
-		g.firestoreIndexes = nil
-
-		// Load based on active tab
-		switch g.collectionsTab {
-		case "functions":
-			g.loadFunctions()
-		case "storage":
-			g.loadStorageBuckets()
-		case "auth":
-			g.loadAuthUsers()
-		case "rules":
-			g.loadFirestoreRules()
-		case "indexes":
-			g.loadFirestoreIndexes()
-		default:
-			if err := g.loadCollections(); err != nil {
-				g.g.Update(func(gui *gocui.Gui) error {
-					g.collectionsLoading = false
-					g.logCommand("api", fmt.Sprintf("ListCollections failed: %v", err), "error")
-					return nil
-				})
-				return
 			}
-
-			g.g.Update(func(gui *gocui.Gui) error {
-				g.collectionsLoading = false
-				g.logCommand("api", fmt.Sprintf("ListCollections(%s) → %d collections", selectedProject.ID, len(g.collections)), "success")
-				return nil
-			})
-		}
+			g.resetProjectState(selectedProject.ID)
+			g.loadDatabases()
+			g.loadActiveTab()
+			return nil
+		})
 	}()
 
 	return nil
 }
 
-func (g *Gui) selectCollection(gui *gocui.Gui) error {
+// resetProjectState drops everything loaded for the previous project and
+// goes back to its default database.
+func (g *Gui) resetProjectState(projectID string) {
+	g.projectGen++
+	g.currentProject = projectID
+	// Databases state
+	g.databases = nil
+	g.selectedDatabaseIdx = 0
+	g.databasesFilter = ""
+	g.databasesLoading = false
+	g.currentDatabase = firebase.DefaultDatabase
+	g.resetDatabaseState()
+	// Functions state
+	g.stopLogsRefresh()
+	g.functions = nil
+	g.currentFunction = nil
+	g.functionLogs = nil
+	g.selectedFunctionIdx = 0
+	g.functionsLoading = false
+	g.logsLoading = false
+	// Storage state
+	g.storageBuckets = nil
+	g.storageObjects = nil
+	g.currentBucket = ""
+	g.storagePrefix = ""
+	g.storagePrefixStack = nil
+	g.selectedBucketIdx = 0
+	g.selectedObjectIdx = 0
+	g.storageLoading = false
+	// Auth state
+	g.authUsers = nil
+	g.selectedAuthIdx = 0
+	g.authLoading = false
+	// Rules state
+	g.firestoreRules = nil
+	g.rulesLoading = false
+	// Filters belong to the old project's data
+	g.functionsFilter = ""
+	g.storageFilter = ""
+	g.authFilter = ""
+}
+
+// resetDatabaseState drops everything loaded from the previous Firestore
+// database. Loads still running for it are dropped when they arrive, and
+// caches are keyed by document path, which repeats across databases.
+func (g *Gui) resetDatabaseState() {
+	g.databaseGen++
+	g.collectionsLoading = false
+	g.treeLoading = false
+	g.detailsLoading = false
+	g.indexesLoading = false
+	// Collections state
+	g.collections = nil
+	g.treeNodes = nil
+	g.currentDocData = nil
+	g.currentDocStats = nil
+	g.currentCollection = ""
+	g.currentDocPath = ""
+	g.selectedCollectionIdx = 0
+	g.selectedTreeIdx = 0
+	g.expandedPaths = make(map[string]bool)
+	g.selectMode = false
+	g.selectedDocs = make(map[int]bool)
+	g.queryResultMode = false
+	g.docCache = make(map[string]map[string]any)
+	g.statsCache = make(map[string]*firebase.DocStats)
+	g.collectionCache = make(map[string][]string)
+	g.compositeIndexCache = make(map[string]*bool)
+	g.clearDetailsCache()
+	// Indexes belong to a database
+	g.firestoreIndexes = nil
+	// Filters belong to the old database's data
+	g.collectionsFilter = ""
+	g.treeFilter = ""
+	g.detailsFilter = ""
+}
+
+// selectDatabase switches to the highlighted Firestore database
+func (g *Gui) selectDatabase() error {
+	databases := g.getFilteredDatabases()
+	if g.selectedDatabaseIdx >= len(databases) {
+		return nil
+	}
+	db := databases[g.selectedDatabaseIdx]
+	if db.ID == g.currentDatabase && g.collections != nil {
+		return nil
+	}
+
+	g.firebaseClient.SetCurrentDatabase(db.ID)
+	g.currentDatabase = db.ID
+	g.resetDatabaseState()
+	g.loadCollections()
+	if g.collectionsTab == "indexes" {
+		g.loadFirestoreIndexes()
+	}
+	g.logCommand("database", fmt.Sprintf("Using database %s", db.ID), "success")
+	return nil
+}
+
+// openDatabase switches to the highlighted database and focuses its collections
+func (g *Gui) openDatabase() error {
+	if err := g.selectDatabase(); err != nil {
+		return err
+	}
+	if g.collectionsTab != "collections" {
+		if err := g.switchCollectionsTab("collections"); err != nil {
+			return err
+		}
+	}
+	return g.setFocus("collections")
+}
+
+// loadActiveTab loads the data shown by the active collections panel tab
+func (g *Gui) loadActiveTab() {
+	switch g.collectionsTab {
+	case "functions":
+		g.loadFunctions()
+	case "storage":
+		g.loadStorageBuckets()
+	case "auth":
+		g.loadAuthUsers()
+	case "rules":
+		g.loadFirestoreRules()
+	case "indexes":
+		g.loadFirestoreIndexes()
+	default:
+		g.loadCollections()
+	}
+}
+
+func (g *Gui) selectCollection() error {
+	gen := g.databaseGen
 	filtered := g.getFilteredCollections()
 	if g.selectedCollectionIdx >= len(filtered) {
 		return nil
@@ -144,6 +236,8 @@ func (g *Gui) selectCollection(gui *gocui.Gui) error {
 
 	collection := filtered[g.selectedCollectionIdx]
 	g.currentCollection = collection.Name
+	g.queryResultMode = false
+	g.treeFilter = ""
 	g.logCommand("api", fmt.Sprintf("ListDocuments(%s) loading...", collection.Name), "running")
 	g.treeLoading = true
 
@@ -151,6 +245,9 @@ func (g *Gui) selectCollection(gui *gocui.Gui) error {
 		docs, err := g.firebaseClient.ListDocuments(collection.Name, 50)
 		if err != nil {
 			g.g.Update(func(gui *gocui.Gui) error {
+				if gen != g.databaseGen {
+					return nil // loaded for another project or database
+				}
 				g.treeLoading = false
 				g.logCommand("api", fmt.Sprintf("ListDocuments failed: %v", err), "error")
 				return nil
@@ -159,27 +256,10 @@ func (g *Gui) selectCollection(gui *gocui.Gui) error {
 		}
 
 		g.g.Update(func(gui *gocui.Gui) error {
-			g.treeNodes = nil
-			g.expandedPaths = make(map[string]bool)
-
-			// Cache all fetched documents
-			for _, doc := range docs {
-				g.docCache[doc.Path] = doc.Data
+			if gen != g.databaseGen {
+				return nil // loaded for another project or database
 			}
-
-			for _, doc := range docs {
-				node := TreeNode{
-					Path:        doc.Path,
-					Name:        doc.ID,
-					Type:        "document",
-					Depth:       0,
-					HasChildren: true,
-					Expanded:    false,
-				}
-				g.treeNodes = append(g.treeNodes, node)
-			}
-
-			g.selectedTreeIdx = 0
+			g.setTreeDocuments(collection.Path, docs)
 			g.treeLoading = false
 			g.logCommand("api", fmt.Sprintf("ListDocuments(%s) → %d docs", collection.Name, len(docs)), "success")
 			return nil
@@ -189,26 +269,146 @@ func (g *Gui) selectCollection(gui *gocui.Gui) error {
 	return nil
 }
 
-func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
+// setTreeDocuments replaces the tree with the top-level documents of a
+// collection. An empty collectionPath (query results) skips the collection cache.
+func (g *Gui) setTreeDocuments(collectionPath string, docs []firebase.Document) {
+	g.treeNodes = nil
+	g.expandedPaths = make(map[string]bool)
+	var docPaths []string
+	for _, doc := range docs {
+		g.docCache[doc.Path] = doc.Data
+		docPaths = append(docPaths, doc.Path)
+		g.treeNodes = append(g.treeNodes, TreeNode{
+			Path:        doc.Path,
+			Name:        doc.ID,
+			Type:        "document",
+			Depth:       0,
+			HasChildren: true,
+			Expanded:    false,
+		})
+	}
+	if collectionPath != "" {
+		g.collectionCache[collectionPath] = docPaths
+	}
+	g.selectedTreeIdx = 0
+}
+
+// openCollection opens the selected collection and focuses the tree
+func (g *Gui) openCollection() error {
+	if err := g.selectCollection(); err != nil {
+		return err
+	}
+	return g.setFocus("tree")
+}
+
+// selectedTreeNode returns the highlighted tree node
+func (g *Gui) selectedTreeNode() (TreeNode, bool) {
 	filtered := g.getFilteredTreeNodes()
-	if g.selectedTreeIdx >= len(filtered) {
+	if g.selectedTreeIdx < 0 || g.selectedTreeIdx >= len(filtered) {
+		return TreeNode{}, false
+	}
+	return filtered[g.selectedTreeIdx], true
+}
+
+// openTreeNode shows a document in details, or expands a collection
+func (g *Gui) openTreeNode() error {
+	node, ok := g.selectedTreeNode()
+	if !ok {
 		return nil
 	}
+	if node.Type == "collection" {
+		return g.selectTreeNode()
+	}
+	// In select mode with docs already loaded, just go to details
+	if g.selectMode && g.currentDocData != nil {
+		return g.setFocus("details")
+	}
+	if idx := g.treeNodeIndex(node.Path); idx >= 0 && g.treeNodes[idx].Expanded {
+		// Already expanded: show it without collapsing its subcollections
+		g.showDocument(node.Path)
+	} else if err := g.selectTreeNode(); err != nil {
+		return err
+	}
+	return g.setFocus("details")
+}
 
-	selectedNode := filtered[g.selectedTreeIdx]
+// showDocument opens a document in details, fetching it if not cached
+func (g *Gui) showDocument(path string) {
+	gen := g.databaseGen
+	if data, ok := g.docCache[path]; ok {
+		g.currentDocPath = path
+		g.currentDocData = data
+		g.currentDocStats = g.statsCache[path]
+		g.clearDetailsCache()
+		return
+	}
+
+	g.detailsLoading = true
+	g.logCommand("api", fmt.Sprintf("GetDocument(%s) loading...", path), "running")
+	go func() {
+		doc, err := g.firebaseClient.GetDocument(path)
+		g.g.Update(func(gui *gocui.Gui) error {
+			if gen != g.databaseGen {
+				return nil // loaded for another project or database
+			}
+			g.detailsLoading = false
+			if err != nil {
+				g.logCommand("api", fmt.Sprintf("GetDocument failed: %v", err), "error")
+				return nil
+			}
+			g.docCache[path] = doc.Data
+			g.statsCache[path] = doc.Stats
+			g.currentDocPath = path
+			g.currentDocData = doc.Data
+			g.currentDocStats = doc.Stats
+			g.clearDetailsCache()
+			g.logCommand("api", fmt.Sprintf("GetDocument(%s) → loaded", path), "success")
+			return nil
+		})
+	}()
+}
+
+// refetchDocument reloads the open document, bypassing the cache
+func (g *Gui) refetchDocument() {
+	path := g.currentDocPath
+	delete(g.docCache, path)
+	g.showDocument(path)
+}
+
+// insertTreeChildren inserts nodes under the node at path and marks it
+// expanded. The path is looked up again because the tree may have changed
+// while the children were loading.
+func (g *Gui) insertTreeChildren(path string, children []TreeNode) {
+	nodeIdx := g.treeNodeIndex(path)
+	if nodeIdx == -1 {
+		return
+	}
+	g.collapseNode(nodeIdx)
+	newNodes := make([]TreeNode, 0, len(g.treeNodes)+len(children))
+	newNodes = append(newNodes, g.treeNodes[:nodeIdx+1]...)
+	newNodes = append(newNodes, children...)
+	newNodes = append(newNodes, g.treeNodes[nodeIdx+1:]...)
+	g.treeNodes = newNodes
+	g.treeNodes[nodeIdx].Expanded = true
+}
+
+func (g *Gui) selectTreeNode() error {
+	gen := g.databaseGen
+	selectedNode, ok := g.selectedTreeNode()
+	if !ok {
+		return nil
+	}
 	nodePath := selectedNode.Path
 	nodeName := selectedNode.Name
 	nodeDepth := selectedNode.Depth
-	nodeType := selectedNode.Type
 
-	originalIdx := g.getOriginalTreeNodeIndex(g.selectedTreeIdx)
-	if originalIdx == -1 {
+	nodeIdx := g.treeNodeIndex(nodePath)
+	if nodeIdx == -1 {
 		return nil
 	}
-	node := &g.treeNodes[originalIdx]
-	nodeIdx := originalIdx
+	node := &g.treeNodes[nodeIdx]
 
-	if nodeType == "document" {
+	if selectedNode.Type == "document" {
 		if node.Expanded {
 			g.collapseNode(nodeIdx)
 			g.treeNodes[nodeIdx].Expanded = false
@@ -237,11 +437,13 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 			var docStats *firebase.DocStats
 			if isCached {
 				docData = cachedData
-				docStats = g.statsCache[nodePath]
 			} else {
 				doc, err := g.firebaseClient.GetDocument(nodePath)
 				if err != nil {
 					g.g.Update(func(gui *gocui.Gui) error {
+						if gen != g.databaseGen {
+							return nil // loaded for another project or database
+						}
 						g.detailsLoading = false
 						g.logCommand("api", fmt.Sprintf("GetDocument failed: %v", err), "error")
 						return nil
@@ -255,12 +457,17 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 			subcols, err := g.firebaseClient.ListSubcollections(nodePath)
 
 			g.g.Update(func(gui *gocui.Gui) error {
+				if gen != g.databaseGen {
+					return nil // loaded for another project or database
+				}
 				g.detailsLoading = false
+				if !isCached {
+					g.statsCache[nodePath] = docStats
+				}
 				g.currentDocPath = nodePath
 				g.currentDocData = docData
-				g.currentDocStats = docStats
+				g.currentDocStats = g.statsCache[nodePath]
 				g.docCache[nodePath] = docData // Cache for future use
-				g.statsCache[nodePath] = docStats
 				g.clearDetailsCache()
 
 				// Async check for composite indexes if not cached
@@ -271,10 +478,14 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 						go func() {
 							hasComposite, err := g.firebaseClient.HasCompositeIndexes(collID)
 							g.g.Update(func(gui *gocui.Gui) error {
+								if gen != g.databaseGen {
+									return nil // loaded for another project or database
+								}
 								if err == nil {
 									val := hasComposite
 									g.compositeIndexCache[collID] = &val
-									g.clearDetailsCache()
+									// Re-render the header; keeps cursor and scroll
+									g.cachedDetailsContent = ""
 								}
 								return nil
 							})
@@ -289,28 +500,18 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 					return nil
 				}
 
-				if nodeIdx < len(g.treeNodes) {
-					newNodes := make([]TreeNode, 0, len(g.treeNodes)+len(subcols))
-					newNodes = append(newNodes, g.treeNodes[:nodeIdx+1]...)
-
-					for _, sub := range subcols {
-						subNode := TreeNode{
-							Path:        sub.Path,
-							Name:        sub.Name,
-							Type:        "collection",
-							Depth:       nodeDepth + 1,
-							HasChildren: true,
-							Expanded:    false,
-						}
-						newNodes = append(newNodes, subNode)
-					}
-
-					newNodes = append(newNodes, g.treeNodes[nodeIdx+1:]...)
-					g.treeNodes = newNodes
-					if nodeIdx < len(g.treeNodes) {
-						g.treeNodes[nodeIdx].Expanded = true
-					}
+				children := make([]TreeNode, 0, len(subcols))
+				for _, sub := range subcols {
+					children = append(children, TreeNode{
+						Path:        sub.Path,
+						Name:        sub.Name,
+						Type:        "collection",
+						Depth:       nodeDepth + 1,
+						HasChildren: true,
+						Expanded:    false,
+					})
 				}
+				g.insertTreeChildren(nodePath, children)
 
 				if !isCached {
 					g.logCommand("api", fmt.Sprintf("GetDocument(%s) → %d subcols", nodeName, len(subcols)), "success")
@@ -319,7 +520,7 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 			})
 		}()
 
-	} else if nodeType == "collection" {
+	} else if selectedNode.Type == "collection" {
 		if node.Expanded {
 			g.collapseNode(nodeIdx)
 			g.treeNodes[nodeIdx].Expanded = false
@@ -328,32 +529,20 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 
 		// Check if collection contents are cached
 		if cachedPaths, ok := g.collectionCache[nodePath]; ok {
-			// Rebuild tree nodes from cache
-			if nodeIdx < len(g.treeNodes) {
-				newNodes := make([]TreeNode, 0, len(g.treeNodes)+len(cachedPaths))
-				newNodes = append(newNodes, g.treeNodes[:nodeIdx+1]...)
-
-				for _, docPath := range cachedPaths {
-					// Extract doc ID from path
-					parts := strings.Split(docPath, "/")
-					docID := parts[len(parts)-1]
-					docNode := TreeNode{
-						Path:        docPath,
-						Name:        docID,
-						Type:        "document",
-						Depth:       nodeDepth + 1,
-						HasChildren: true,
-						Expanded:    false,
-					}
-					newNodes = append(newNodes, docNode)
-				}
-
-				newNodes = append(newNodes, g.treeNodes[nodeIdx+1:]...)
-				g.treeNodes = newNodes
-				if nodeIdx < len(g.treeNodes) {
-					g.treeNodes[nodeIdx].Expanded = true
-				}
+			children := make([]TreeNode, 0, len(cachedPaths))
+			for _, docPath := range cachedPaths {
+				// Extract doc ID from path
+				parts := strings.Split(docPath, "/")
+				children = append(children, TreeNode{
+					Path:        docPath,
+					Name:        parts[len(parts)-1],
+					Type:        "document",
+					Depth:       nodeDepth + 1,
+					HasChildren: true,
+					Expanded:    false,
+				})
 			}
+			g.insertTreeChildren(nodePath, children)
 			g.logCommand("cache", fmt.Sprintf("Using cached %s → %d docs", nodeName, len(cachedPaths)), "success")
 			return nil
 		}
@@ -364,6 +553,9 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 			docs, err := g.firebaseClient.ListDocuments(nodePath, 50)
 			if err != nil {
 				g.g.Update(func(gui *gocui.Gui) error {
+					if gen != g.databaseGen {
+						return nil // loaded for another project or database
+					}
 					g.logCommand("api", fmt.Sprintf("ListDocuments failed: %v", err), "error")
 					return nil
 				})
@@ -371,6 +563,9 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 			}
 
 			g.g.Update(func(gui *gocui.Gui) error {
+				if gen != g.databaseGen {
+					return nil // loaded for another project or database
+				}
 				if len(docs) == 0 {
 					g.logCommand("api", fmt.Sprintf("ListDocuments(%s) → empty", nodeName), "success")
 					return nil
@@ -378,34 +573,21 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 
 				// Cache document data and collection contents
 				var docPaths []string
+				children := make([]TreeNode, 0, len(docs))
 				for _, doc := range docs {
 					g.docCache[doc.Path] = doc.Data
 					docPaths = append(docPaths, doc.Path)
+					children = append(children, TreeNode{
+						Path:        doc.Path,
+						Name:        doc.ID,
+						Type:        "document",
+						Depth:       nodeDepth + 1,
+						HasChildren: true,
+						Expanded:    false,
+					})
 				}
 				g.collectionCache[nodePath] = docPaths
-
-				if nodeIdx < len(g.treeNodes) {
-					newNodes := make([]TreeNode, 0, len(g.treeNodes)+len(docs))
-					newNodes = append(newNodes, g.treeNodes[:nodeIdx+1]...)
-
-					for _, doc := range docs {
-						docNode := TreeNode{
-							Path:        doc.Path,
-							Name:        doc.ID,
-							Type:        "document",
-							Depth:       nodeDepth + 1,
-							HasChildren: true,
-							Expanded:    false,
-						}
-						newNodes = append(newNodes, docNode)
-					}
-
-					newNodes = append(newNodes, g.treeNodes[nodeIdx+1:]...)
-					g.treeNodes = newNodes
-					if nodeIdx < len(g.treeNodes) {
-						g.treeNodes[nodeIdx].Expanded = true
-					}
-				}
+				g.insertTreeChildren(nodePath, children)
 
 				g.logCommand("api", fmt.Sprintf("ListDocuments(%s) → %d docs", nodeName, len(docs)), "success")
 				return nil
@@ -416,7 +598,7 @@ func (g *Gui) selectTreeNode(gui *gocui.Gui) error {
 	return nil
 }
 
-func (g *Gui) selectFunction(gui *gocui.Gui) error {
+func (g *Gui) selectFunction() error {
 	filtered := g.getFilteredFunctions()
 	if g.selectedFunctionIdx >= len(filtered) {
 		return nil
@@ -440,7 +622,15 @@ func (g *Gui) selectFunction(gui *gocui.Gui) error {
 	return nil
 }
 
-func (g *Gui) fetchProjectDetails(gui *gocui.Gui) error {
+// openFunction selects the function and focuses details to see its logs
+func (g *Gui) openFunction() error {
+	if err := g.selectFunction(); err != nil {
+		return err
+	}
+	return g.setFocus("details")
+}
+
+func (g *Gui) fetchProjectDetails() error {
 	filtered := g.getFilteredProjects()
 	if g.selectedProjectIndex >= len(filtered) {
 		return nil
@@ -485,86 +675,36 @@ func (g *Gui) collapseNode(idx int) {
 	}
 }
 
-// Help popup builder
+// Keybindings menu
 
+// buildHelpPopup lists the bindings active in the focused panel, grouped like
+// lazygit's keybindings menu: panel actions, navigation, then global keys
 func (g *Gui) buildHelpPopup() {
-	items := []PopupItem{
-		{Key: "", Label: "Global", IsHeader: true},
-		{Key: "←/→ h/l", Label: "Switch panels"},
-		{Key: "↑/↓ j/k", Label: "Move up/down"},
-		{Key: "g/G", Label: "Go to top/bottom"},
-		{Key: "PgUp/PgDn", Label: "Page up/down"},
-		{Key: "1/2/3", Label: "Jump to panel"},
-		{Key: "Space", Label: "Select / Expand", Action: g.doSpace},
-		{Key: "/", Label: "Filter / Search", Action: g.doStartFilter},
-		{Key: "Esc", Label: "Back / Collapse / Close"},
-		{Key: "r", Label: "Refresh", Action: g.doRefresh},
-		{Key: "R", Label: "Clear cache", Action: g.doClearCache},
-		{Key: "i", Label: "Cache stats", Action: g.doShowCacheStats},
-		{Key: "M", Label: "Collection memory", Action: g.doCollectionMemoryEstimate},
-		{Key: "A", Label: "Field type analysis", Action: g.doFieldTypeAnalysis},
-		{Key: "L", Label: "Cycle log level", Action: g.doCycleLogLevel},
-		{Key: "0", Label: "Command log", Action: g.doFocusCommands},
-		{Key: "@", Label: "Command log (modal)", Action: g.doToggleModal},
-		{Key: "?", Label: "This help"},
-		{Key: "q", Label: "Quit", Action: g.doQuit},
-		{Key: "", Label: g.getPanelName(), IsHeader: true},
-	}
+	ctx := g.currentContext()
+	local, nav, global := g.contextBindings(ctx)
 
-	switch g.currentColumn {
-	case "projects":
-		items = append(items,
-			PopupItem{Key: "Enter", Label: "Fetch project details", Action: g.doEnter},
-			PopupItem{Key: "Space", Label: "Select project", Action: g.doSpace},
-			PopupItem{Key: "S", Label: "Scan collections health", Action: g.doScanCollections},
-		)
-	case "collections":
-		items = append(items,
-			PopupItem{Key: "[ / ]", Label: "Cycle tabs (6 tabs)", Action: g.doSwitchTab},
-			PopupItem{Key: "Space", Label: "Select / Navigate", Action: g.doSpace},
-			PopupItem{Key: "Esc", Label: "Back (storage folders)"},
-			PopupItem{Key: "F", Label: "Query builder", Action: g.doOpenQuery},
-		)
-	case "tree":
-		items = append(items,
-			PopupItem{Key: "Space", Label: "Expand / Collapse", Action: g.doSpace},
-			PopupItem{Key: "Enter", Label: "Open in details", Action: g.doEnter},
-			PopupItem{Key: "v", Label: "Select mode (multi-select)", Action: g.doToggleSelectMode},
-			PopupItem{Key: "C", Label: "Collapse all nodes", Action: g.doCollapseAll},
-			PopupItem{Key: "F", Label: "Query builder", Action: g.doOpenQuery},
-			PopupItem{Key: "p", Label: "Copy path to clipboard", Action: g.doCopyPath},
-			PopupItem{Key: "c", Label: "Copy JSON to clipboard", Action: g.doCopyJSON},
-			PopupItem{Key: "s", Label: "Save JSON to Downloads", Action: g.doSaveJSON},
-			PopupItem{Key: "x", Label: "Export all cached docs", Action: g.doExportCachedDocs},
-			PopupItem{Key: "A", Label: "Field type analysis", Action: g.doFieldTypeAnalysis},
-			PopupItem{Key: "M", Label: "Collection memory estimate", Action: g.doCollectionMemoryEstimate},
-		)
-	case "details":
-		// Show [ / ] only when Functions tab is active
-		if g.collectionsTab == "functions" {
-			items = append(items, PopupItem{Key: "[ / ]", Label: "Switch Details/Logs", Action: g.doSwitchTab})
+	var items []PopupItem
+	addSection := func(title string, bindings []*Binding) {
+		var section []PopupItem
+		seen := make(map[string]bool)
+		for _, b := range bindings {
+			if b.Description == "" || seen[b.Description] {
+				continue
+			}
+			seen[b.Description] = true
+			section = append(section, PopupItem{Key: b.keyLabel(), Label: b.Description, Binding: b})
 		}
-		items = append(items,
-			PopupItem{Key: "j/k", Label: "Scroll content"},
-			PopupItem{Key: "J/K", Label: "Scroll 5 lines"},
-			PopupItem{Key: "Ctrl+d/u", Label: "Half-page scroll"},
-			PopupItem{Key: "Esc", Label: "Go back"},
-			PopupItem{Key: "t", Label: "Toggle compact JSON", Action: g.doToggleCompactJSON},
-			PopupItem{Key: "w", Label: "Toggle word wrap", Action: g.doToggleWrap},
-			PopupItem{Key: "T", Label: "Toggle timestamps", Action: g.doToggleTimestamps},
-			PopupItem{Key: "H", Label: "Toggle line numbers", Action: g.doToggleLineNumbers},
-			PopupItem{Key: "n/N", Label: "Next/prev search match"},
-			PopupItem{Key: "y", Label: "Copy field value", Action: g.doCopyFieldValue},
-			PopupItem{Key: "D", Label: "Field size breakdown", Action: g.doFieldSizeBreakdown},
-			PopupItem{Key: "B", Label: "Decode base64 value", Action: g.doToggleBase64Decode},
-			PopupItem{Key: "p", Label: "Copy path to clipboard", Action: g.doCopyPath},
-			PopupItem{Key: "c", Label: "Copy JSON to clipboard", Action: g.doCopyJSON},
-			PopupItem{Key: "s", Label: "Save JSON to Downloads", Action: g.doSaveJSON},
-			PopupItem{Key: "e", Label: "Open in editor", Action: g.doEditInEditor},
-		)
+		if len(section) == 0 {
+			return
+		}
+		items = append(items, PopupItem{Label: title, IsHeader: true})
+		items = append(items, section...)
 	}
+	addSection(g.getContextName(ctx), local)
+	addSection("Navigation", nav)
+	addSection("Global", global)
 
-	g.helpPopup = NewPopup("Keyboard Shortcuts", items, g.theme, g.views.helpModal)
+	g.helpPopup = NewPopup("Keybindings", items, g.theme)
 }
 
 func (g *Gui) renderHelpContent(v *gocui.View) {
@@ -574,20 +714,31 @@ func (g *Gui) renderHelpContent(v *gocui.View) {
 	g.helpPopup.Render(v)
 }
 
-func (g *Gui) getPanelName() string {
-	return g.getPanelNameFor(g.currentColumn)
-}
-
-func (g *Gui) getPanelNameFor(panel string) string {
-	switch panel {
-	case "projects":
+// getContextName returns a display name for a context
+func (g *Gui) getContextName(ctx Context) string {
+	switch ctx {
+	case CtxProjects:
 		return "Projects"
-	case "collections":
+	case CtxDatabases:
+		return "Databases"
+	case CtxCollections:
 		return "Collections"
-	case "tree":
+	case CtxFunctions:
+		return "Functions"
+	case CtxStorage:
+		return "Storage"
+	case CtxAuth:
+		return "Auth"
+	case CtxRules:
+		return "Rules"
+	case CtxIndexes:
+		return "Indexes"
+	case CtxTree:
 		return "Tree"
-	case "details":
+	case CtxDetails:
 		return "Details"
+	case CtxMenu:
+		return "Keybindings"
 	default:
 		return "Panel"
 	}

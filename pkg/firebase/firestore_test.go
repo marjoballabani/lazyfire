@@ -603,3 +603,56 @@ func TestExtractFirestoreValue(t *testing.T) {
 		})
 	}
 }
+
+func TestFirestoreBaseURLUsesDatabase(t *testing.T) {
+	c := &Client{currentProject: "p1"}
+	if got, want := c.firestoreBaseURL(), "https://firestore.googleapis.com/v1/projects/p1/databases/(default)/documents"; got != want {
+		t.Errorf("default database: got %q, want %q", got, want)
+	}
+
+	c.SetCurrentDatabase("analytics")
+	if got, want := c.firestoreBaseURL(), "https://firestore.googleapis.com/v1/projects/p1/databases/analytics/documents"; got != want {
+		t.Errorf("named database: got %q, want %q", got, want)
+	}
+
+	emulator := &Client{currentProject: "demo", emulatorMode: true, firestoreHost: "localhost:8080"}
+	emulator.SetCurrentDatabase("analytics")
+	if got, want := emulator.firestoreBaseURL(), "http://localhost:8080/v1/projects/demo/databases/analytics/documents"; got != want {
+		t.Errorf("emulator: got %q, want %q", got, want)
+	}
+
+	// Switching projects goes back to the default database
+	_ = c.SetCurrentProject("p2")
+	if got := c.GetCurrentDatabase(); got != DefaultDatabase {
+		t.Errorf("after project switch: database %q, want %q", got, DefaultDatabase)
+	}
+}
+
+func TestParseDatabases(t *testing.T) {
+	body := []byte(`{"databases": [
+		{"name": "projects/p1/databases/zeta", "locationId": "eur3", "type": "FIRESTORE_NATIVE"},
+		{"name": "projects/p1/databases/(default)", "locationId": "nam5", "type": "FIRESTORE_NATIVE"},
+		{"name": "projects/p1/databases/legacy", "locationId": "us-east1", "type": "DATASTORE_MODE"}
+	]}`)
+	got, err := parseDatabases(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Database{
+		{ID: "(default)", LocationID: "nam5", Type: "FIRESTORE_NATIVE"},
+		{ID: "legacy", LocationID: "us-east1", Type: "DATASTORE_MODE"},
+		{ID: "zeta", LocationID: "eur3", Type: "FIRESTORE_NATIVE"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d databases, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("database %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+
+	if _, err := parseDatabases([]byte("not json")); err == nil {
+		t.Error("expected an error for invalid JSON")
+	}
+}

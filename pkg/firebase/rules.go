@@ -100,7 +100,7 @@ type IndexField struct {
 	Order     string // ASCENDING, DESCENDING, or CONTAINS (for array)
 }
 
-// ListFirestoreIndexes returns all composite indexes for the current project.
+// ListFirestoreIndexes returns all composite indexes of the current database.
 func (c *Client) ListFirestoreIndexes() ([]FirestoreIndex, error) {
 	if c.currentProject == "" {
 		return nil, fmt.Errorf("no project selected")
@@ -114,7 +114,7 @@ func (c *Client) ListFirestoreIndexes() ([]FirestoreIndex, error) {
 		return nil, err
 	}
 
-	url := fmt.Sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/(default)/collectionGroups/-/indexes", c.currentProject)
+	url := fmt.Sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/%s/collectionGroups/-/indexes", c.currentProject, c.GetCurrentDatabase())
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -160,7 +160,7 @@ func (c *Client) ListFirestoreIndexes() ([]FirestoreIndex, error) {
 		}
 
 		// Extract collection group from name
-		// Format: projects/{project}/databases/(default)/collectionGroups/{group}/indexes/{id}
+		// Format: projects/{project}/databases/{database}/collectionGroups/{group}/indexes/{id}
 		parts := strings.Split(idx.Name, "/")
 		collGroup := ""
 		for i, p := range parts {

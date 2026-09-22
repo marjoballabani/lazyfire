@@ -53,6 +53,13 @@ type Gui struct {
 	selectedProjectIndex int
 	currentProject       string
 
+	// Firestore databases of the current project
+	databases           []firebase.Database
+	selectedDatabaseIdx int
+	currentDatabase     string
+	databasesLoading    bool
+	databasesFilter     string
+
 	// Collections state
 	collections           []firebase.Collection
 	selectedCollectionIdx int
@@ -89,6 +96,7 @@ type Gui struct {
 	// Rules state
 	firestoreRules       *firebase.FirestoreRules
 	rulesLoading         bool
+	collectionsScrollPos int // scroll offset of the rules/indexes tabs
 
 	// Indexes state
 	firestoreIndexes     []firebase.FirestoreIndex
@@ -121,19 +129,20 @@ type Gui struct {
 	currentDocStats    *firebase.DocStats
 	currentProjectInfo *firebase.ProjectDetails
 	detailsScrollPos   int
+	detailsCursor      int    // highlighted line in details (view line, wrapping included)
+	detailsLineCount   int    // view lines in details, updated by Layout
+	detailsViewHeight  int    // visible lines in details, updated by Layout
 	detailsTab         string // "details" or "logs"
 
 	// Display mode
 	compactJSON        bool // Toggle between compact and pretty JSON
 	humanizeTimestamps bool // Format Firestore timestamps in human-readable form
 	showLineNumbers    bool // Show line numbers in JSON view
-	detailsCursorLine  int  // Cursor line in details for field operations
 	logLevelFilter     string // Filter function logs by severity (e.g., "ERROR")
 
 	// Cached rendered content (avoid re-rendering on every Layout)
 	cachedDetailsContent string
 	cachedDetailsDocPath string
-	cachedDetailsLines   []string // Raw JSON lines for search
 	cachedDetailsHeader  string   // Header (path + stats)
 	detailsViewDirty     bool     // True when content needs to be pushed to view
 
@@ -151,10 +160,13 @@ type Gui struct {
 		help        string
 		modal       string
 		helpModal   string
+		databases   string
 		queryModal  string
 		queryInput  string
 		querySelect string
 		confirm     string
+		filterPrefix string
+		filterInput  string
 	}
 
 	// Current column: "projects", "collections", "tree", "details"
@@ -175,10 +187,9 @@ type Gui struct {
 	spinnerFrame       uint32 // Current spinner animation frame
 
 	// Filter state
-	filterInputActive bool   // true when typing in filter bar
-	filterInputText   string // current input text
-	filterInputPanel  string // which panel is being filtered
-	filterCursorPos   int    // cursor position in filter text
+	filterInputActive bool    // true when typing in filter bar
+	filterInputText   string  // current input text
+	filterInputPanel  Context // which context is being filtered
 
 	// Committed filters (persist after Enter, cleared by Esc)
 	projectsFilter    string
@@ -213,6 +224,24 @@ type Gui struct {
 
 	// Frame styling
 	roundedFrameRunes []rune
+
+	// Keybindings, see keybindings.go
+	bindings []*Binding
+
+	// Bumped on every project switch so results loaded for the previous
+	// project are dropped instead of mixed into the new one
+	projectGen int
+	// Same for Firestore data, bumped on every project or database switch
+	databaseGen int
+
+	// Last query run on a whole collection, re-run by refresh
+	lastQueryCollection string
+	lastQueryOptions    firebase.QueryOptions
+
+	// Toast shown in the options bar for a few seconds
+	toastText    string
+	toastIsError bool
+	toastSeq     int
 }
 
 const (
@@ -260,6 +289,7 @@ func NewGui(config *config.Config, firebaseClient *firebase.Client, version stri
 		version:        version,
 		theme:          theme,
 		currentProject: firebaseClient.GetCurrentProject(),
+		currentDatabase: firebaseClient.GetCurrentDatabase(),
 		currentColumn:  "projects",
 		collectionsTab: "collections",
 		detailsTab:     "details",
@@ -273,6 +303,7 @@ func NewGui(config *config.Config, firebaseClient *firebase.Client, version stri
 
 	// Set view names
 	gui.views.projects = "projects"
+	gui.views.databases = "databases"
 	gui.views.collections = "collections"
 	gui.views.tree = "tree"
 	gui.views.details = "details"
@@ -285,6 +316,8 @@ func NewGui(config *config.Config, firebaseClient *firebase.Client, version stri
 	gui.views.querySelect = "querySelect"
 	gui.views.confirm = "confirm"
 	gui.views.background = "background"
+	gui.views.filterPrefix = "filterPrefix"
+	gui.views.filterInput = "filterInput"
 
 	// Configure gocui
 	g.Cursor = false
@@ -360,41 +393,12 @@ func (g *Gui) Run() error {
 		}
 	}()
 
-	// Load projects asynchronously after UI starts
-	go func() {
-		// Show auth status
-		authType := "service account"
-		if g.firebaseClient.IsUsingLocalAuth() {
-			authType = "local Firebase/gcloud"
-		}
-		g.g.Update(func(gui *gocui.Gui) error {
-			g.logCommand("auth", fmt.Sprintf("Using %s authentication", authType), "success")
-			return nil
-		})
-
-		// Load projects
-		g.g.Update(func(gui *gocui.Gui) error {
-			g.logCommand("load", "Loading projects...", "running")
-			return nil
-		})
-
-		if err := g.loadProjects(); err != nil {
-			g.g.Update(func(gui *gocui.Gui) error {
-				g.isLoading = false
-				g.loadingText = ""
-				g.logCommand("load", fmt.Sprintf("Failed: %v", err), "error")
-				return nil
-			})
-			return
-		}
-
-		g.g.Update(func(gui *gocui.Gui) error {
-			g.isLoading = false
-			g.loadingText = ""
-			g.logCommand("load", fmt.Sprintf("Loaded %d projects", len(g.projects)), "success")
-			return nil
-		})
-	}()
+	authType := "service account"
+	if g.firebaseClient.IsUsingLocalAuth() {
+		authType = "local Firebase/gcloud"
+	}
+	g.logCommand("auth", fmt.Sprintf("Using %s authentication", authType), "success")
+	g.loadProjects()
 
 	if err := g.g.MainLoop(); err != nil && err != gocui.ErrQuit {
 		return err
@@ -402,33 +406,116 @@ func (g *Gui) Run() error {
 	return nil
 }
 
-func (g *Gui) loadProjects() error {
-	projects, err := g.firebaseClient.ListProjects()
-	if err != nil {
-		return err
+// loadProjects lists projects, keeping the highlighted project (or the
+// active one on first load) selected
+func (g *Gui) loadProjects() {
+	g.isLoading = true
+	g.loadingText = "Loading projects..."
+	g.logCommand("load", "Loading projects...", "running")
+	selectedID := g.selectedItemKey(CtxProjects)
+	if selectedID == "" {
+		selectedID = g.currentProject
 	}
-	g.projects = projects
-	return nil
+	go func() {
+		projects, err := g.firebaseClient.ListProjects()
+		g.g.Update(func(gui *gocui.Gui) error {
+			g.isLoading = false
+			g.loadingText = ""
+			if err != nil {
+				g.logCommand("load", fmt.Sprintf("Failed: %v", err), "error")
+				return nil
+			}
+			g.projects = projects
+			g.selectItemByKey(CtxProjects, selectedID)
+			g.logCommand("load", fmt.Sprintf("Loaded %d projects", len(projects)), "success")
+			return nil
+		})
+	}()
 }
 
-func (g *Gui) loadCollections() error {
-	collections, err := g.firebaseClient.ListCollections()
-	if err != nil {
-		return err
+// loadDatabases lists the current project's Firestore databases, keeping the
+// highlighted one (or the active one) selected. If listing fails, e.g. for
+// lack of permission, the default database is still offered.
+func (g *Gui) loadDatabases() {
+	gen := g.projectGen
+	g.databasesLoading = true
+	selectedID := g.selectedItemKey(CtxDatabases)
+	if selectedID == "" {
+		selectedID = g.currentDatabase
 	}
-	g.collections = collections
-	g.selectedCollectionIdx = 0
-	return nil
+	go func() {
+		databases, err := g.firebaseClient.ListDatabases()
+		g.g.Update(func(gui *gocui.Gui) error {
+			if gen != g.projectGen {
+				return nil // loaded for the previous project
+			}
+			g.databasesLoading = false
+			if err != nil {
+				g.logCommand("databases", fmt.Sprintf("ListDatabases failed: %v", err), "error")
+				databases = []firebase.Database{{ID: firebase.DefaultDatabase}}
+			} else {
+				g.logCommand("databases", fmt.Sprintf("Loaded %d databases", len(databases)), "success")
+			}
+			g.databases = databases
+			g.selectItemByKey(CtxDatabases, selectedID)
+			return nil
+		})
+	}()
+}
+
+// loadCollections lists the current database's root collections
+func (g *Gui) loadCollections() {
+	gen := g.databaseGen
+	g.collectionsLoading = true
+	go func() {
+		collections, err := g.firebaseClient.ListCollections()
+		g.g.Update(func(gui *gocui.Gui) error {
+			if gen != g.databaseGen {
+				return nil // loaded for another project or database
+			}
+			g.collectionsLoading = false
+			if err != nil {
+				g.logCommand("api", fmt.Sprintf("ListCollections failed: %v", err), "error")
+				return nil
+			}
+			g.collections = collections
+			g.logCommand("api", fmt.Sprintf("ListCollections(%s) → %d collections", g.currentProject, len(collections)), "success")
+			return nil
+		})
+	}()
 }
 
 // clearDetailsCache clears all cached details content and resets scroll
 func (g *Gui) clearDetailsCache() {
 	g.cachedDetailsContent = ""
 	g.cachedDetailsDocPath = ""
-	g.cachedDetailsLines = nil
 	g.cachedDetailsHeader = ""
 	g.detailsViewDirty = true
 	g.detailsScrollPos = 0
+	g.detailsCursor = 0
+}
+
+// toast shows a short message in the options bar for a few seconds
+func (g *Gui) toast(msg string, isError bool) {
+	g.toastText = msg
+	g.toastIsError = isError
+	g.toastSeq++
+	if g.g == nil {
+		return
+	}
+	seq := g.toastSeq
+	duration := 2500 * time.Millisecond
+	if isError {
+		duration = 4 * time.Second
+	}
+	time.AfterFunc(duration, func() {
+		g.g.Update(func(*gocui.Gui) error {
+			if g.toastSeq == seq {
+				g.toastText = ""
+			}
+			return nil
+		})
+	})
 }
 
 // getLoadingText returns formatted loading text with animated spinner
@@ -440,22 +527,25 @@ func (g *Gui) getLoadingText(text string) string {
 
 // isAnyLoading returns true if any panel is currently loading
 func (g *Gui) isAnyLoading() bool {
-	return g.isLoading || g.collectionsLoading || g.treeLoading || g.detailsLoading || g.functionsLoading || g.logsLoading || g.storageLoading || g.authLoading || g.rulesLoading || g.indexesLoading
+	return g.isLoading || g.databasesLoading || g.collectionsLoading || g.treeLoading || g.detailsLoading || g.functionsLoading || g.logsLoading || g.storageLoading || g.authLoading || g.rulesLoading || g.indexesLoading
 }
 
 // loadFunctions loads Cloud Functions for the current project
 func (g *Gui) loadFunctions() {
+	gen := g.projectGen
 	g.functionsLoading = true
 	go func() {
 		functions, err := g.firebaseClient.ListFunctions()
 		g.g.Update(func(gui *gocui.Gui) error {
+			if gen != g.projectGen {
+				return nil // loaded for the previous project
+			}
 			g.functionsLoading = false
 			if err != nil {
 				g.logCommand("functions", fmt.Sprintf("Error: %v", err), "error")
 				return nil
 			}
 			g.functions = functions
-			g.selectedFunctionIdx = 0
 			g.logCommand("functions", fmt.Sprintf("Loaded %d functions", len(functions)), "success")
 			return nil
 		})
@@ -464,13 +554,23 @@ func (g *Gui) loadFunctions() {
 
 // loadFunctionLogs loads logs for the current function
 func (g *Gui) loadFunctionLogs() {
+	gen := g.projectGen
 	if g.currentFunction == nil {
 		return
 	}
 	g.logsLoading = true
+	name := g.currentFunction.DisplayName
 	go func() {
-		logs, err := g.firebaseClient.GetFunctionLogs(g.currentFunction.DisplayName, 50)
+		logs, err := g.firebaseClient.GetFunctionLogs(name, 50)
 		g.g.Update(func(gui *gocui.Gui) error {
+			if gen != g.projectGen {
+				return nil // loaded for the previous project
+			}
+			// Logs of a function the user moved away from; the newer request
+			// for the current function owns logsLoading
+			if g.currentFunction == nil || g.currentFunction.DisplayName != name {
+				return nil
+			}
 			g.logsLoading = false
 			if err != nil {
 				g.logCommand("logs", fmt.Sprintf("Error: %v", err), "error")
@@ -505,39 +605,53 @@ func (g *Gui) stopLogsRefresh() {
 
 // loadStorageBuckets loads Cloud Storage buckets for the current project
 func (g *Gui) loadStorageBuckets() {
+	gen := g.projectGen
 	g.storageLoading = true
 	go func() {
 		buckets, err := g.firebaseClient.ListBuckets()
 		g.g.Update(func(gui *gocui.Gui) error {
+			if gen != g.projectGen {
+				return nil // loaded for the previous project
+			}
 			g.storageLoading = false
 			if err != nil {
 				g.logCommand("storage", fmt.Sprintf("Error: %v", err), "error")
 				return nil
 			}
 			g.storageBuckets = buckets
-			g.selectedBucketIdx = 0
 			g.logCommand("storage", fmt.Sprintf("Loaded %d buckets", len(buckets)), "success")
 			return nil
 		})
 	}()
 }
 
-// loadStorageObjects loads objects in a bucket with the current prefix
-func (g *Gui) loadStorageObjects() {
+// loadStorageObjects loads objects in a bucket with the current prefix and
+// selects the object named selectName, if any
+func (g *Gui) loadStorageObjects(selectName string) {
+	gen := g.projectGen
 	if g.currentBucket == "" {
 		return
 	}
 	g.storageLoading = true
+	bucket, prefix := g.currentBucket, g.storagePrefix
 	go func() {
-		objects, err := g.firebaseClient.ListObjects(g.currentBucket, g.storagePrefix, 100)
+		objects, err := g.firebaseClient.ListObjects(bucket, prefix, 100)
 		g.g.Update(func(gui *gocui.Gui) error {
+			if gen != g.projectGen {
+				return nil // loaded for the previous project
+			}
+			if g.currentBucket != bucket || g.storagePrefix != prefix {
+				return nil // the user already left this folder
+			}
 			g.storageLoading = false
 			if err != nil {
 				g.logCommand("storage", fmt.Sprintf("Error: %v", err), "error")
 				return nil
 			}
 			g.storageObjects = objects
-			g.selectedObjectIdx = 0
+			if selectName != "" {
+				g.selectItemByKey(CtxStorage, selectName)
+			}
 			g.logCommand("storage", fmt.Sprintf("Listed %d items in %s", len(objects), g.currentBucket), "success")
 			return nil
 		})
@@ -546,17 +660,20 @@ func (g *Gui) loadStorageObjects() {
 
 // loadAuthUsers loads Firebase Auth users
 func (g *Gui) loadAuthUsers() {
+	gen := g.projectGen
 	g.authLoading = true
 	go func() {
 		users, err := g.firebaseClient.ListAuthUsers(100)
 		g.g.Update(func(gui *gocui.Gui) error {
+			if gen != g.projectGen {
+				return nil // loaded for the previous project
+			}
 			g.authLoading = false
 			if err != nil {
 				g.logCommand("auth", fmt.Sprintf("Error: %v", err), "error")
 				return nil
 			}
 			g.authUsers = users
-			g.selectedAuthIdx = 0
 			g.logCommand("auth", fmt.Sprintf("Loaded %d users", len(users)), "success")
 			return nil
 		})
@@ -565,10 +682,14 @@ func (g *Gui) loadAuthUsers() {
 
 // loadFirestoreRules loads current Firestore security rules
 func (g *Gui) loadFirestoreRules() {
+	gen := g.projectGen
 	g.rulesLoading = true
 	go func() {
 		rules, err := g.firebaseClient.GetFirestoreRules()
 		g.g.Update(func(gui *gocui.Gui) error {
+			if gen != g.projectGen {
+				return nil // loaded for the previous project
+			}
 			g.rulesLoading = false
 			if err != nil {
 				g.logCommand("rules", fmt.Sprintf("Error: %v", err), "error")
@@ -583,10 +704,14 @@ func (g *Gui) loadFirestoreRules() {
 
 // loadFirestoreIndexes loads Firestore composite indexes
 func (g *Gui) loadFirestoreIndexes() {
+	gen := g.databaseGen
 	g.indexesLoading = true
 	go func() {
 		indexes, err := g.firebaseClient.ListFirestoreIndexes()
 		g.g.Update(func(gui *gocui.Gui) error {
+			if gen != g.databaseGen {
+				return nil // loaded for another project or database
+			}
 			g.indexesLoading = false
 			if err != nil {
 				g.logCommand("indexes", fmt.Sprintf("Error: %v", err), "error")

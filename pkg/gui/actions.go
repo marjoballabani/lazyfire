@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -16,54 +17,28 @@ import (
 	"github.com/marjoballabani/lazyfire/pkg/firebase"
 )
 
-// Actions - clean handler functions without state checks.
-// State checks are handled by the binding system's GetDisabledReason.
+// Actions - handler functions. Which panel/tab they run in is decided by the
+// binding contexts in keybindings.go; state checks live in GetDisabledReason.
 
 // doQuit exits the application
 func (g *Gui) doQuit() error {
 	return gocui.ErrQuit
 }
 
-// doEscape handles escape key - closes modals, cancels filter, returns from details
-func (g *Gui) doEscape() error {
-	// Priority: help popup > command modal > details panel > select mode (only in tree) > filter input > committed filter
-	if g.helpOpen {
-		g.helpOpen = false
-		g.helpPopup = nil
-		return g.Layout(g.g)
-	}
-	if g.modalOpen {
-		g.modalOpen = false
-		return g.Layout(g.g)
-	}
-	// Return from details to previous panel (keeps select mode)
-	if g.currentColumn == "details" {
+// doBackFromDetails returns focus to the panel details was opened from
+func (g *Gui) doBackFromDetails() error {
+	if g.scanResults != nil {
 		g.scanResults = nil
 		g.clearDetailsCache()
-		target := g.previousColumn
-		if target == "" {
-			target = "tree"
-		}
-		return g.setFocus(g.g, target)
 	}
-	// Storage: go back up folder/bucket hierarchy
-	if g.currentColumn == "collections" && g.collectionsTab == "storage" && (g.currentBucket != "" || g.storagePrefix != "") {
-		return g.doStorageBack()
+	target := g.previousColumn
+	if target == "" || target == "details" {
+		target = "tree"
 	}
-	// Exit select mode only when in tree panel
-	if g.selectMode && g.currentColumn == "tree" {
-		return g.doExitSelectMode()
-	}
-	if g.filterInputActive {
-		return g.cancelFilterInput(g.g)
-	}
-	if g.hasActiveFilter(g.currentColumn) {
-		return g.clearCurrentFilter(g.g)
-	}
-	return nil
+	return g.setFocus(target)
 }
 
-// doToggleHelp toggles the help popup
+// doToggleHelp toggles the keybindings menu
 func (g *Gui) doToggleHelp() error {
 	if g.helpOpen {
 		g.helpOpen = false
@@ -72,420 +47,235 @@ func (g *Gui) doToggleHelp() error {
 		g.buildHelpPopup()
 		g.helpOpen = true
 	}
-	return g.Layout(g.g)
+	return g.relayout()
 }
 
 // doToggleModal toggles the command log modal
 func (g *Gui) doToggleModal() error {
 	g.modalOpen = !g.modalOpen
-	return g.Layout(g.g)
+	return g.relayout()
 }
 
-// Context-specific handlers for help popup
 func (g *Gui) helpMoveUp() error {
 	if g.helpPopup != nil {
 		g.helpPopup.MoveUp()
 	}
-	return g.Layout(g.g)
+	return nil
 }
 
 func (g *Gui) helpMoveDown() error {
 	if g.helpPopup != nil {
 		g.helpPopup.MoveDown()
 	}
-	return g.Layout(g.g)
-}
-
-func (g *Gui) helpClose() error {
-	// Get selected item before closing
-	var action func() error
-	if g.helpPopup != nil {
-		item := g.helpPopup.GetSelectedItem()
-		if item != nil && item.Action != nil {
-			action = item.Action
-		}
-	}
-
-	// Close popup
-	g.helpOpen = false
-	g.helpPopup = nil
-
-	// Execute action if any
-	if action != nil {
-		return action()
-	}
-	return g.Layout(g.g)
-}
-
-// Context-specific handlers for filter mode
-func (g *Gui) filterCursorLeft() error {
-	if g.filterCursorPos > 0 {
-		g.filterCursorPos--
-	}
-	return g.Layout(g.g)
-}
-
-func (g *Gui) filterCursorRight() error {
-	if g.filterCursorPos < len(g.filterInputText) {
-		g.filterCursorPos++
-	}
-	return g.Layout(g.g)
-}
-
-// Block handler - does nothing (for modal context)
-func (g *Gui) blockAction() error {
 	return nil
 }
 
-// Filter char inserters for keys that have other bindings
-func (g *Gui) filterInsertJ() error         { return g.insertFilterChar(g.g, 'j') }
-func (g *Gui) filterInsertK() error         { return g.insertFilterChar(g.g, 'k') }
-func (g *Gui) filterInsertH() error         { return g.insertFilterChar(g.g, 'h') }
-func (g *Gui) filterInsertL() error         { return g.insertFilterChar(g.g, 'l') }
-func (g *Gui) filterInsertQuestion() error  { return g.insertFilterChar(g.g, '?') }
-func (g *Gui) filterInsertAt() error        { return g.insertFilterChar(g.g, '@') }
-func (g *Gui) filterInsertC() error         { return g.insertFilterChar(g.g, 'c') }
-func (g *Gui) filterInsertS() error         { return g.insertFilterChar(g.g, 's') }
-func (g *Gui) filterInsertR() error         { return g.insertFilterChar(g.g, 'r') }
-func (g *Gui) filterInsertQ() error      { return g.insertFilterChar(g.g, 'q') }
-func (g *Gui) filterInsertUpperF() error { return g.insertFilterChar(g.g, 'F') }
-func (g *Gui) filterInsertUpperS() error { return g.insertFilterChar(g.g, 'S') }
+// helpExecute closes the menu and runs the selected binding. A disabled
+// binding keeps the menu open and explains why.
+func (g *Gui) helpExecute() error {
+	if g.helpPopup == nil {
+		return nil
+	}
+	item := g.helpPopup.GetSelectedItem()
+	if item == nil || item.Binding == nil {
+		return nil
+	}
+	if reason := item.Binding.disabledReason(); reason != "" {
+		g.toast(reason, true)
+		return nil
+	}
+	g.helpOpen = false
+	g.helpPopup = nil
+	if err := item.Binding.Handler(); err != nil {
+		return err
+	}
+	return g.relayout()
+}
+
+// helpEscape clears the menu filter, or closes the menu
+func (g *Gui) helpEscape() error {
+	if g.helpPopup != nil && g.helpPopup.Filter() != "" {
+		g.helpPopup.SetFilter("")
+		return nil
+	}
+	g.helpOpen = false
+	g.helpPopup = nil
+	return g.relayout()
+}
 
 func (g *Gui) doConfirmAccept() error {
-	if g.confirmCallback != nil {
-		cb := g.confirmCallback
-		g.confirmOpen = false
-		g.confirmCallback = nil
+	cb := g.confirmCallback
+	g.confirmOpen = false
+	g.confirmCallback = nil
+	if cb != nil {
 		cb()
 	}
-	return g.Layout(g.g)
+	return g.relayout()
 }
 
 func (g *Gui) doConfirmCancel() error {
 	g.confirmOpen = false
 	g.confirmCallback = nil
-	return g.Layout(g.g)
+	return g.relayout()
 }
-func (g *Gui) filterInsertV() error         { return g.insertFilterChar(g.g, 'v') }
-func (g *Gui) filterInsertE() error         { return g.insertFilterChar(g.g, 'e') }
-func (g *Gui) filterInsertSlash() error        { return g.insertFilterChar(g.g, '/') }
-func (g *Gui) filterInsertBracketLeft() error  { return g.insertFilterChar(g.g, '[') }
-func (g *Gui) filterInsertBracketRight() error { return g.insertFilterChar(g.g, ']') }
 
-// doColumnLeft switches to the panel on the left (skips details)
+// sidePanels lists the left panels top to bottom
+var sidePanels = []string{"projects", "databases", "collections", "tree"}
+
+// doColumnLeft switches to the side panel above, wrapping around
 func (g *Gui) doColumnLeft() error {
-	if g.currentColumn == "details" {
-		return nil // Use Esc to leave details
-	}
-	var newColumn string
-	switch g.currentColumn {
-	case "projects":
-		newColumn = "tree" // wrap to tree
-	case "collections":
-		newColumn = "projects"
-	case "tree":
-		newColumn = "collections"
-	}
-	return g.setFocus(g.g, newColumn)
+	return g.cycleSidePanel(-1)
 }
 
-// doColumnRight switches to the panel on the right (skips details)
+// doColumnRight switches to the side panel below, wrapping around
 func (g *Gui) doColumnRight() error {
-	if g.currentColumn == "details" {
-		return nil // Use Esc to leave details
-	}
-	var newColumn string
-	switch g.currentColumn {
-	case "projects":
-		newColumn = "collections"
-	case "collections":
-		newColumn = "tree"
-	case "tree":
-		newColumn = "projects" // wrap to projects
-	}
-	return g.setFocus(g.g, newColumn)
+	return g.cycleSidePanel(1)
 }
 
-// doPageUp jumps up 10 items in current panel
-func (g *Gui) doPageUp() error {
-	switch g.currentColumn {
-	case "projects":
-		g.selectedProjectIndex -= 10
-		if g.selectedProjectIndex < 0 {
-			g.selectedProjectIndex = 0
+func (g *Gui) cycleSidePanel(dir int) error {
+	for i, panel := range sidePanels {
+		if panel == g.currentColumn {
+			return g.setFocus(sidePanels[(i+dir+len(sidePanels))%len(sidePanels)])
 		}
+	}
+	return nil
+}
+
+// listState returns the selection index and item count of a list context,
+// or nil for contexts without a selectable list
+func (g *Gui) listState(ctx Context) (*int, int) {
+	switch ctx {
+	case CtxProjects:
+		return &g.selectedProjectIndex, len(g.getFilteredProjects())
+	case CtxDatabases:
+		return &g.selectedDatabaseIdx, len(g.getFilteredDatabases())
+	case CtxCollections:
+		return &g.selectedCollectionIdx, len(g.getFilteredCollections())
+	case CtxFunctions:
+		return &g.selectedFunctionIdx, len(g.getFilteredFunctions())
+	case CtxStorage:
+		if g.currentBucket == "" {
+			return &g.selectedBucketIdx, len(g.getFilteredBuckets())
+		}
+		return &g.selectedObjectIdx, len(g.getFilteredObjects())
+	case CtxAuth:
+		return &g.selectedAuthIdx, len(g.getFilteredAuthUsers())
+	case CtxTree:
+		return &g.selectedTreeIdx, len(g.getFilteredTreeNodes())
+	}
+	return nil, 0
+}
+
+// setSelection selects item idx of a list context
+func (g *Gui) setSelection(ctx Context, idx int) {
+	sel, _ := g.listState(ctx)
+	if sel == nil || *sel == idx {
+		return
+	}
+	*sel = idx
+	switch ctx {
+	case CtxProjects:
 		g.currentProjectInfo = nil
-	case "collections":
-		g.pageUpCollections(10)
-	case "tree":
-		g.selectedTreeIdx -= 10
-		if g.selectedTreeIdx < 0 {
-			g.selectedTreeIdx = 0
-		}
-	case "details":
-		g.detailsScrollPos -= 10
-		if g.detailsScrollPos < 0 {
-			g.detailsScrollPos = 0
+	case CtxTree:
+		if g.selectMode {
+			g.updateSelectRange()
 		}
 	}
-	return g.Layout(g.g)
 }
 
-// doPageDown jumps down 10 items in current panel
-func (g *Gui) doPageDown() error {
-	switch g.currentColumn {
-	case "projects":
-		filtered := g.getFilteredProjects()
-		g.selectedProjectIndex += 10
-		if g.selectedProjectIndex >= len(filtered) {
-			g.selectedProjectIndex = len(filtered) - 1
+// moveBy moves the focused panel's selection by delta items. Text panels
+// (details, rules, indexes) move their cursor or scroll instead.
+func (g *Gui) moveBy(delta int) error {
+	ctx := g.currentContext()
+	switch ctx {
+	case CtxDetails:
+		if delta > 1 || delta < -1 {
+			// Page moves scroll along so the cursor keeps its row on screen
+			g.detailsScrollPos = max(0, min(g.detailsScrollPos+delta, g.maxDetailsScroll()))
 		}
-		if g.selectedProjectIndex < 0 {
-			g.selectedProjectIndex = 0
-		}
-		g.currentProjectInfo = nil
-	case "collections":
-		g.pageDownCollections(10)
-	case "tree":
-		filtered := g.getFilteredTreeNodes()
-		g.selectedTreeIdx += 10
-		if g.selectedTreeIdx >= len(filtered) {
-			g.selectedTreeIdx = len(filtered) - 1
-		}
-		if g.selectedTreeIdx < 0 {
-			g.selectedTreeIdx = 0
-		}
-	case "details":
-		g.detailsScrollPos += 10
-	}
-	return g.Layout(g.g)
-}
-
-// doCursorUp moves selection up in current panel
-func (g *Gui) doCursorUp() error {
-	switch g.currentColumn {
-	case "projects":
-		if g.selectedProjectIndex > 0 {
-			g.selectedProjectIndex--
-			g.currentProjectInfo = nil
-		}
-	case "collections":
-		switch g.collectionsTab {
-		case "functions":
-			filtered := g.getFilteredFunctions()
-			if g.selectedFunctionIdx > 0 && g.selectedFunctionIdx < len(filtered) {
-				g.selectedFunctionIdx--
-			}
-		case "storage":
-			if g.currentBucket == "" {
-				if g.selectedBucketIdx > 0 {
-					g.selectedBucketIdx--
-				}
-			} else {
-				if g.selectedObjectIdx > 0 {
-					g.selectedObjectIdx--
-				}
-			}
-		case "auth":
-			if g.selectedAuthIdx > 0 {
-				g.selectedAuthIdx--
-			}
-		default:
-			if g.selectedCollectionIdx > 0 {
-				g.selectedCollectionIdx--
-			}
-		}
-	case "tree":
-		if g.selectedTreeIdx > 0 {
-			g.selectedTreeIdx--
-		}
-	case "details":
-		if g.detailsScrollPos > 0 {
-			g.detailsScrollPos--
+		g.setDetailsCursor(g.detailsCursor + delta)
+	case CtxRules, CtxIndexes:
+		// Clamped to the content height by Layout
+		g.collectionsScrollPos = max(0, g.collectionsScrollPos+delta)
+	default:
+		if sel, n := g.listState(ctx); sel != nil && n > 0 {
+			g.setSelection(ctx, max(0, min(*sel+delta, n-1)))
 		}
 	}
-	return g.Layout(g.g)
+	return nil
 }
 
-// doCursorDown moves selection down in current panel
-func (g *Gui) doCursorDown() error {
-	switch g.currentColumn {
-	case "projects":
-		filtered := g.getFilteredProjects()
-		if g.selectedProjectIndex < len(filtered)-1 {
-			g.selectedProjectIndex++
-			g.currentProjectInfo = nil
-		}
-	case "collections":
-		switch g.collectionsTab {
-		case "functions":
-			filtered := g.getFilteredFunctions()
-			if g.selectedFunctionIdx < len(filtered)-1 {
-				g.selectedFunctionIdx++
-			}
-		case "storage":
-			if g.currentBucket == "" {
-				if g.selectedBucketIdx < len(g.storageBuckets)-1 {
-					g.selectedBucketIdx++
-				}
-			} else {
-				if g.selectedObjectIdx < len(g.storageObjects)-1 {
-					g.selectedObjectIdx++
-				}
-			}
-		case "auth":
-			if g.selectedAuthIdx < len(g.authUsers)-1 {
-				g.selectedAuthIdx++
-			}
-		default:
-			filtered := g.getFilteredCollections()
-			if g.selectedCollectionIdx < len(filtered)-1 {
-				g.selectedCollectionIdx++
-			}
-		}
-	case "tree":
-		filtered := g.getFilteredTreeNodes()
-		if g.selectedTreeIdx < len(filtered)-1 {
-			g.selectedTreeIdx++
-		}
-	case "details":
-		g.detailsScrollPos++
-	}
-	return g.Layout(g.g)
-}
-
-// doHalfPageDown scrolls details half a page down
-func (g *Gui) doHalfPageDown() error {
-	if g.currentColumn == "details" {
-		g.detailsScrollPos += 20
-	}
-	return g.Layout(g.g)
-}
-
-// doHalfPageUp scrolls details half a page up
-func (g *Gui) doHalfPageUp() error {
-	if g.currentColumn == "details" {
-		g.detailsScrollPos -= 20
-		if g.detailsScrollPos < 0 {
-			g.detailsScrollPos = 0
+func (g *Gui) moveToTop() error {
+	switch ctx := g.currentContext(); ctx {
+	case CtxDetails:
+		g.setDetailsCursor(0)
+	case CtxRules, CtxIndexes:
+		g.collectionsScrollPos = 0
+	default:
+		if sel, n := g.listState(ctx); sel != nil && n > 0 {
+			g.setSelection(ctx, 0)
 		}
 	}
-	return g.Layout(g.g)
+	return nil
 }
 
-// doJumpToProjects focuses the projects panel
-func (g *Gui) doJumpToProjects() error {
-	if g.currentColumn == "details" {
-		return nil
-	}
-	return g.setFocus(g.g, "projects")
-}
-
-// doJumpToCollections focuses the collections panel
-func (g *Gui) doJumpToCollections() error {
-	if g.currentColumn == "details" {
-		return nil
-	}
-	return g.setFocus(g.g, "collections")
-}
-
-// doJumpToTree focuses the tree panel
-func (g *Gui) doJumpToTree() error {
-	if g.currentColumn == "details" {
-		return nil
-	}
-	return g.setFocus(g.g, "tree")
-}
-
-// doGoToTop jumps to the first item in current panel
-func (g *Gui) doGoToTop() error {
-	switch g.currentColumn {
-	case "projects":
-		g.selectedProjectIndex = 0
-		g.currentProjectInfo = nil
-	case "collections":
-		switch g.collectionsTab {
-		case "functions":
-			g.selectedFunctionIdx = 0
-		case "storage":
-			if g.currentBucket == "" {
-				g.selectedBucketIdx = 0
-			} else {
-				g.selectedObjectIdx = 0
-			}
-		case "auth":
-			g.selectedAuthIdx = 0
-		default:
-			g.selectedCollectionIdx = 0
+func (g *Gui) moveToBottom() error {
+	switch ctx := g.currentContext(); ctx {
+	case CtxDetails:
+		g.setDetailsCursor(g.detailsLineCount - 1)
+	case CtxRules, CtxIndexes:
+		g.collectionsScrollPos = 1 << 30 // clamped by Layout
+	default:
+		if sel, n := g.listState(ctx); sel != nil && n > 0 {
+			g.setSelection(ctx, n-1)
 		}
-	case "tree":
-		g.selectedTreeIdx = 0
-	case "details":
-		g.detailsScrollPos = 0
 	}
-	return g.Layout(g.g)
+	return nil
 }
 
-// doGoToBottom jumps to the last item in current panel
-func (g *Gui) doGoToBottom() error {
-	switch g.currentColumn {
-	case "projects":
-		filtered := g.getFilteredProjects()
-		if len(filtered) > 0 {
-			g.selectedProjectIndex = len(filtered) - 1
+// pageSize is the visible height of the focused panel
+func (g *Gui) pageSize() int {
+	if g.g != nil {
+		if v, err := g.g.View(g.contextView(g.currentContext())); err == nil && v.InnerHeight() > 0 {
+			return v.InnerHeight()
 		}
-		g.currentProjectInfo = nil
-	case "collections":
-		switch g.collectionsTab {
-		case "functions":
-			filtered := g.getFilteredFunctions()
-			if len(filtered) > 0 {
-				g.selectedFunctionIdx = len(filtered) - 1
-			}
-		case "storage":
-			if g.currentBucket == "" {
-				if len(g.storageBuckets) > 0 {
-					g.selectedBucketIdx = len(g.storageBuckets) - 1
-				}
-			} else {
-				if len(g.storageObjects) > 0 {
-					g.selectedObjectIdx = len(g.storageObjects) - 1
-				}
-			}
-		case "auth":
-			if len(g.authUsers) > 0 {
-				g.selectedAuthIdx = len(g.authUsers) - 1
-			}
-		default:
-			filtered := g.getFilteredCollections()
-			if len(filtered) > 0 {
-				g.selectedCollectionIdx = len(filtered) - 1
-			}
-		}
-	case "tree":
-		filtered := g.getFilteredTreeNodes()
-		if len(filtered) > 0 {
-			g.selectedTreeIdx = len(filtered) - 1
-		}
-	case "details":
-		// Scroll to bottom - use a large number, layout will clamp
-		g.detailsScrollPos = 99999
 	}
-	return g.Layout(g.g)
+	return 10
 }
 
-// doNextColumn - Tab goes to details panel from any panel
-func (g *Gui) doNextColumn() error {
-	if g.currentColumn == "details" {
-		return nil // Already in details, do nothing
-	}
-	g.previousColumn = g.currentColumn
-	return g.setFocus(g.g, "details")
+func (g *Gui) halfPageSize() int {
+	return max(1, g.pageSize()/2)
 }
 
-// doSwitchTab switches tabs based on current panel ([ and ] keys)
-// Collections panel: switch Collections/Functions tabs
-// Details panel: switch Details/Logs tabs (only when Functions tab is active)
+// setDetailsCursor moves the details cursor to line and scrolls it into view
+func (g *Gui) setDetailsCursor(line int) {
+	g.detailsCursor = max(0, min(line, g.detailsLineCount-1))
+	if g.detailsCursor < g.detailsScrollPos {
+		g.detailsScrollPos = g.detailsCursor
+	} else if h := g.detailsViewHeight; h > 0 && g.detailsCursor >= g.detailsScrollPos+h {
+		g.detailsScrollPos = g.detailsCursor - h + 1
+	}
+}
+
+// scrollDetails scrolls details by delta lines, dragging the cursor along
+// when it would leave the screen
+func (g *Gui) scrollDetails(delta int) {
+	g.detailsScrollPos = max(0, min(g.detailsScrollPos+delta, g.maxDetailsScroll()))
+	if g.detailsCursor < g.detailsScrollPos {
+		g.detailsCursor = g.detailsScrollPos
+	}
+	if h := g.detailsViewHeight; h > 0 && g.detailsCursor >= g.detailsScrollPos+h {
+		g.detailsCursor = g.detailsScrollPos + h - 1
+	}
+}
+
+func (g *Gui) maxDetailsScroll() int {
+	return max(0, g.detailsLineCount-g.detailsViewHeight)
+}
+
+// collectionsTabs lists the collections panel tabs in display order
+var collectionsTabs = []string{"collections", "functions", "storage", "auth", "rules", "indexes"}
+
 // doSwitchTabNext cycles to next tab (] key)
 func (g *Gui) doSwitchTabNext() error {
 	return g.doSwitchTabDir(1)
@@ -496,220 +286,88 @@ func (g *Gui) doSwitchTabPrev() error {
 	return g.doSwitchTabDir(-1)
 }
 
-func (g *Gui) doSwitchTab() error {
-	return g.doSwitchTabDir(1)
+func (g *Gui) doSwitchTabDir(dir int) error {
+	if g.currentColumn == "details" {
+		// Details and Logs are the only two tabs, so both directions toggle
+		return g.toggleDetailsTab()
+	}
+	idx := 0
+	for i, t := range collectionsTabs {
+		if t == g.collectionsTab {
+			idx = i
+			break
+		}
+	}
+	return g.switchCollectionsTab(collectionsTabs[(idx+dir+len(collectionsTabs))%len(collectionsTabs)])
 }
 
-func (g *Gui) doSwitchTabDir(dir int) error {
-	switch g.currentColumn {
-	case "collections":
-		tabs := []string{"collections", "functions", "storage", "auth", "rules", "indexes"}
-		currentIdx := 0
-		for i, t := range tabs {
-			if t == g.collectionsTab {
-				currentIdx = i
-				break
-			}
-		}
-		next := (currentIdx + dir + len(tabs)) % len(tabs)
-		g.collectionsTab = tabs[next]
+// switchCollectionsTab activates a collections panel tab, loading its data on
+// first visit
+func (g *Gui) switchCollectionsTab(tab string) error {
+	g.collectionsTab = tab
+	g.collectionsScrollPos = 0
 
-		// Reset view scroll position when switching tabs
-		if v, err := g.g.View("collections"); err == nil {
+	// Reset view scroll position when switching tabs
+	if g.g != nil {
+		if v, err := g.g.View(g.views.collections); err == nil {
 			v.SetOrigin(0, 0)
 		}
+	}
 
-		// Load data for the new tab if needed
-		switch g.collectionsTab {
-		case "collections":
-			g.stopLogsRefresh()
-			if len(g.collections) == 0 && g.currentProject != "" {
-				g.collectionsLoading = true
-				go func() {
-					if err := g.loadCollections(); err != nil {
-						g.g.Update(func(gui *gocui.Gui) error {
-							g.collectionsLoading = false
-							g.logCommand("api", fmt.Sprintf("ListCollections failed: %v", err), "error")
-							return nil
-						})
-						return
-					}
-					g.g.Update(func(gui *gocui.Gui) error {
-						g.collectionsLoading = false
-						g.logCommand("api", fmt.Sprintf("ListCollections → %d collections", len(g.collections)), "success")
-						return nil
-					})
-				}()
-			}
-		case "functions":
-			if len(g.functions) == 0 && g.currentProject != "" {
-				g.loadFunctions()
-			}
-		case "storage":
-			if len(g.storageBuckets) == 0 && g.currentProject != "" {
-				g.loadStorageBuckets()
-			}
-		case "auth":
-			if len(g.authUsers) == 0 && g.currentProject != "" {
-				g.loadAuthUsers()
-			}
-		case "rules":
-			if g.firestoreRules == nil && g.currentProject != "" {
-				g.loadFirestoreRules()
-			}
-		case "indexes":
-			if g.firestoreIndexes == nil && g.currentProject != "" {
-				g.loadFirestoreIndexes()
-			}
-		}
-	case "details":
-		// Switch Details/Logs tabs (only when Functions tab is active)
-		if g.collectionsTab != "functions" {
-			return nil
-		}
-		if g.detailsTab == "details" {
-			g.detailsTab = "logs"
-			if g.currentFunction != nil && len(g.functionLogs) == 0 && !g.logsLoading {
-				g.loadFunctionLogs()
-			}
-		} else {
-			g.detailsTab = "details"
-		}
-	default:
+	if tab == "collections" {
+		g.stopLogsRefresh()
+	}
+	if g.currentProject == "" {
 		return nil
 	}
-	return g.Layout(g.g)
-}
-
-// doSpace handles space key - select/expand in current panel
-// doSpace - normal mode space handler
-func (g *Gui) doSpace() error {
-	switch g.currentColumn {
-	case "projects":
-		return g.selectProject(g.g)
+	switch tab {
 	case "collections":
-		switch g.collectionsTab {
-		case "functions":
-			return g.selectFunction(g.g)
-		case "storage":
-			return g.doSelectStorageItem()
-		default:
-			return g.selectCollection(g.g)
+		if len(g.collections) == 0 && !g.collectionsLoading {
+			g.loadCollections()
 		}
-	case "tree":
-		return g.selectTreeNode(g.g)
+	case "functions":
+		if len(g.functions) == 0 && !g.functionsLoading {
+			g.loadFunctions()
+		}
+	case "storage":
+		if len(g.storageBuckets) == 0 && !g.storageLoading {
+			g.loadStorageBuckets()
+		}
+	case "auth":
+		if len(g.authUsers) == 0 && !g.authLoading {
+			g.loadAuthUsers()
+		}
+	case "rules":
+		if g.firestoreRules == nil && !g.rulesLoading {
+			g.loadFirestoreRules()
+		}
+	case "indexes":
+		if g.firestoreIndexes == nil && !g.indexesLoading {
+			g.loadFirestoreIndexes()
+		}
 	}
 	return nil
 }
 
-// filterInsertSpace inserts space in filter
-func (g *Gui) filterInsertSpace() error {
-	return g.insertFilterChar(g.g, ' ')
-}
-
-// doEnter - normal mode enter handler
-func (g *Gui) doEnter() error {
-	switch g.currentColumn {
-	case "projects":
-		return g.fetchProjectDetails(g.g)
-	case "collections":
-		switch g.collectionsTab {
-		case "functions":
-			// Select function and go to details to see logs
-			if err := g.selectFunction(g.g); err != nil {
-				return err
-			}
-			g.previousColumn = g.currentColumn
-			return g.setFocus(g.g, "details")
-		case "storage":
-			return g.doSelectStorageItem()
-		case "auth":
-			// Go to details to view user info
-			g.previousColumn = g.currentColumn
-			return g.setFocus(g.g, "details")
+// toggleDetailsTab switches the function details panel between Details and Logs
+func (g *Gui) toggleDetailsTab() error {
+	if g.detailsTab == "details" {
+		g.detailsTab = "logs"
+		if g.currentFunction != nil && len(g.functionLogs) == 0 && !g.logsLoading {
+			g.loadFunctionLogs()
 		}
-	case "tree":
-		// In select mode with docs already loaded, just go to details
-		if g.selectMode && g.currentDocData != nil {
-			g.previousColumn = g.currentColumn
-			return g.setFocus(g.g, "details")
-		}
-		// Select the node (loads document) then go to details
-		if err := g.selectTreeNode(g.g); err != nil {
-			return err
-		}
-		g.previousColumn = g.currentColumn
-		return g.setFocus(g.g, "details")
+	} else {
+		g.detailsTab = "details"
 	}
+	g.detailsCursor = 0
+	g.detailsScrollPos = 0
 	return nil
-}
-
-// filterCommit commits the filter
-func (g *Gui) filterCommit() error {
-	return g.commitFilter(g.g)
-}
-
-// doStartFilter starts filter mode for current panel
-func (g *Gui) doStartFilter() error {
-	if g.filterInputActive {
-		return nil
-	}
-	// Clear existing committed filter
-	switch g.currentColumn {
-	case "projects":
-		g.projectsFilter = ""
-	case "collections":
-		switch g.collectionsTab {
-		case "functions":
-			g.functionsFilter = ""
-		case "storage":
-			g.storageFilter = ""
-		case "auth":
-			g.authFilter = ""
-		default:
-			g.collectionsFilter = ""
-		}
-	case "tree":
-		g.treeFilter = ""
-	case "details":
-		g.detailsFilter = ""
-	}
-	g.filterInputActive = true
-	g.filterInputPanel = g.currentColumn
-	g.filterInputText = ""
-	g.filterCursorPos = 0
-	return g.Layout(g.g)
-}
-
-// doFilterBackspace handles backspace in filter mode
-func (g *Gui) doFilterBackspace() error {
-	if !g.filterInputActive {
-		return nil
-	}
-	if g.filterCursorPos > 0 && len(g.filterInputText) > 0 {
-		g.filterInputText = g.filterInputText[:g.filterCursorPos-1] + g.filterInputText[g.filterCursorPos:]
-		g.filterCursorPos--
-	}
-	return g.Layout(g.g)
-}
-
-// makeFilterCharAction creates a handler for a specific character
-func (g *Gui) makeFilterCharAction(ch rune) func() error {
-	return func() error {
-		if !g.filterInputActive {
-			return nil
-		}
-		return g.insertFilterChar(g.g, ch)
-	}
 }
 
 // doCopyJSON copies current document to clipboard
 func (g *Gui) doCopyJSON() error {
-	if g.scanResults != nil && g.currentDocData == nil {
+	if g.currentColumn == "details" && g.detailsSource() == "scan" {
 		return g.copyScanReport()
-	}
-	if g.currentColumn != "tree" && g.currentColumn != "details" {
-		return nil
 	}
 	return g.copyJSONAction()
 }
@@ -842,35 +500,15 @@ func (g *Gui) doCollapseAll() error {
 
 // doCopyPath copies the current document/node path to clipboard
 func (g *Gui) doCopyPath() error {
-	var path string
-	switch g.currentColumn {
-	case "tree":
-		filtered := g.getFilteredTreeNodes()
-		if g.selectedTreeIdx < len(filtered) {
-			path = filtered[g.selectedTreeIdx].Path
+	path := g.currentDocPath
+	if g.currentColumn == "tree" {
+		node, ok := g.selectedTreeNode()
+		if !ok {
+			return nil
 		}
-	case "details":
-		path = g.currentDocPath
-	default:
-		return nil
+		path = node.Path
 	}
-	if path == "" {
-		g.logCommand("path", "No path to copy", "error")
-		return nil
-	}
-
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("pbcopy")
-	case "linux":
-		cmd = exec.Command("xclip", "-selection", "clipboard")
-	default:
-		g.logCommand("path", "Clipboard not supported", "error")
-		return nil
-	}
-	cmd.Stdin = strings.NewReader(path)
-	if err := cmd.Run(); err != nil {
+	if err := copyToClipboard(path); err != nil {
 		g.logCommand("path", fmt.Sprintf("Failed: %v", err), "error")
 		return nil
 	}
@@ -878,13 +516,25 @@ func (g *Gui) doCopyPath() error {
 	return nil
 }
 
+// copyToClipboard puts text on the system clipboard
+func copyToClipboard(text string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbcopy")
+	case "linux":
+		cmd = exec.Command("xclip", "-selection", "clipboard")
+	default:
+		return fmt.Errorf("clipboard not supported on %s", runtime.GOOS)
+	}
+	cmd.Stdin = strings.NewReader(text)
+	return cmd.Run()
+}
+
 // doSaveJSON saves current document to file
 func (g *Gui) doSaveJSON() error {
-	if g.scanResults != nil && g.currentDocData == nil {
+	if g.currentColumn == "details" && g.detailsSource() == "scan" {
 		return g.saveScanReport()
-	}
-	if g.currentColumn != "tree" && g.currentColumn != "details" {
-		return nil
 	}
 	return g.saveJSONAction()
 }
@@ -961,197 +611,202 @@ func (g *Gui) doEditInEditor() error {
 	return g.Layout(g.g)
 }
 
-// doRefresh reloads data based on current panel and tab
+// doRefresh reloads whatever the focused panel (or tab) shows
 func (g *Gui) doRefresh() error {
-	switch g.currentColumn {
-	case "details":
-		// In details view with Logs tab: refresh logs
-		if g.detailsTab == "logs" && g.currentFunction != nil {
+	switch g.currentContext() {
+	case CtxProjects:
+		g.loadProjects()
+	case CtxDatabases:
+		g.loadDatabases()
+	case CtxCollections:
+		g.loadCollections()
+	case CtxFunctions:
+		g.loadFunctions()
+	case CtxStorage:
+		if g.currentBucket == "" {
+			g.loadStorageBuckets()
+		} else {
+			g.loadStorageObjects(g.selectedItemKey(CtxStorage))
+		}
+	case CtxAuth:
+		g.loadAuthUsers()
+	case CtxRules:
+		g.loadFirestoreRules()
+	case CtxIndexes:
+		g.loadFirestoreIndexes()
+	case CtxTree:
+		if g.queryResultMode {
+			g.runQuery(g.lastQueryCollection, -1, g.lastQueryOptions)
+			return nil
+		}
+		g.reloadTree()
+	case CtxDetails:
+		switch g.detailsSource() {
+		case "function":
 			g.logCommand("r", "Refreshing logs...", "running")
 			g.loadFunctionLogs()
-			return g.Layout(g.g)
-		}
-	case "collections":
-		// In collections panel with functions tab: refresh functions
-		if g.collectionsTab == "functions" {
-			g.logCommand("r", "Refreshing functions...", "running")
-			g.loadFunctions()
-			return g.Layout(g.g)
-		}
-		// In collections panel with collections tab: refresh collections
-		if g.currentProject != "" {
-			g.logCommand("r", "Refreshing collections...", "running")
-			g.collectionsLoading = true
-			go func() {
-				if err := g.loadCollections(); err != nil {
-					g.g.Update(func(gui *gocui.Gui) error {
-						g.collectionsLoading = false
-						g.logCommand("r", fmt.Sprintf("Failed: %v", err), "error")
-						return nil
-					})
-					return
-				}
-				g.g.Update(func(gui *gocui.Gui) error {
-					g.collectionsLoading = false
-					g.logCommand("r", fmt.Sprintf("Loaded %d collections", len(g.collections)), "success")
-					return nil
-				})
-			}()
-			return g.Layout(g.g)
-		}
-	case "projects":
-		// In projects panel: refresh projects
-		g.logCommand("r", "Refreshing projects...", "running")
-		if err := g.loadProjects(); err != nil {
-			g.logCommand("r", fmt.Sprintf("Failed: %v", err), "error")
-			return g.Layout(g.g)
-		}
-		g.logCommand("r", fmt.Sprintf("Loaded %d projects", len(g.projects)), "success")
-		return g.Layout(g.g)
-	case "tree":
-		// In tree panel: refresh current collection documents
-		if g.currentCollection != "" {
-			g.logCommand("r", "Refreshing documents...", "running")
-			g.treeLoading = true
-			go func() {
-				docs, err := g.firebaseClient.ListDocuments(g.currentCollection, 50)
-				g.g.Update(func(gui *gocui.Gui) error {
-					g.treeLoading = false
-					if err != nil {
-						g.logCommand("r", fmt.Sprintf("Failed: %v", err), "error")
-						return nil
-					}
-					g.treeNodes = nil
-					for _, doc := range docs {
-						g.docCache[doc.Path] = doc.Data
-						node := TreeNode{
-							Path:        doc.Path,
-							Name:        doc.ID,
-							Type:        "document",
-							Depth:       0,
-							HasChildren: true,
-							Expanded:    false,
-						}
-						g.treeNodes = append(g.treeNodes, node)
-					}
-					g.selectedTreeIdx = 0
-					g.logCommand("r", fmt.Sprintf("Loaded %d documents", len(docs)), "success")
-					return nil
-				})
-			}()
-			return g.Layout(g.g)
+		case "document":
+			g.refetchDocument()
 		}
 	}
-
 	return nil
 }
 
-// Mouse click handlers
+// reloadTree reloads the open collection's documents into the tree
+func (g *Gui) reloadTree() {
+	gen := g.databaseGen
+	collection := g.currentCollection
+	g.logCommand("r", "Refreshing documents...", "running")
+	g.treeLoading = true
+	go func() {
+		docs, err := g.firebaseClient.ListDocuments(collection, 50)
+		g.g.Update(func(gui *gocui.Gui) error {
+			if gen != g.databaseGen {
+				return nil // loaded for another project or database
+			}
+			g.treeLoading = false
+			if err != nil {
+				g.logCommand("r", fmt.Sprintf("Failed: %v", err), "error")
+				return nil
+			}
+			g.queryResultMode = false
+			g.setTreeDocuments(collection, docs)
+			g.logCommand("r", fmt.Sprintf("Loaded %d documents", len(docs)), "success")
+			return nil
+		})
+	}()
+}
 
-func (g *Gui) doHelpClick() error {
-	if g.helpPopup == nil {
+// doClearQueryResults replaces query results with the collection's documents
+func (g *Gui) doClearQueryResults() error {
+	g.queryResultMode = false
+	if g.currentCollection == "" {
+		g.treeNodes = nil
+		g.selectedTreeIdx = 0
 		return nil
 	}
-	v, _ := g.g.View("helpModal")
-	if v == nil {
+	g.reloadTree()
+	return nil
+}
+
+// Mouse handlers
+
+// onPanelClick focuses the clicked panel and selects the clicked row. A
+// double click also opens the row, like enter.
+func (g *Gui) onPanelClick(column string, opts gocui.ViewMouseBindingOpts) error {
+	if g.closeDismissablePopup() || isPopupContext(g.currentContext()) {
 		return nil
 	}
-	_, cy := v.Cursor()
-	_, oy := v.Origin()
-	clickedLine := cy + oy
+	// Collapsed panels only show the active project or database, so a click
+	// there just expands them
+	wasCollapsed := (column == "projects" || column == "databases") && g.currentColumn != column
+	if err := g.setFocus(column); err != nil {
+		return err
+	}
+	if wasCollapsed {
+		return nil
+	}
 
-	if clickedLine >= 0 && clickedLine < len(g.helpPopup.Items) {
-		item := &g.helpPopup.Items[clickedLine]
-		if !item.IsHeader {
-			g.helpPopup.SelectedIdx = clickedLine
+	ctx := g.currentContext()
+	if ctx == CtxDetails {
+		g.setDetailsCursor(opts.Y)
+	} else if sel, n := g.listState(ctx); sel != nil && opts.Y >= 0 && opts.Y < n {
+		g.setSelection(ctx, opts.Y)
+	} else {
+		return nil
+	}
+
+	if opts.IsDoubleClick {
+		if b := g.findBinding(ctx, gocui.KeyEnter); b != nil {
+			return g.runBinding(b)
 		}
 	}
-	return g.Layout(g.g)
+	return nil
 }
 
-func (g *Gui) doProjectsClick() error {
-	if g.helpOpen {
-		g.helpOpen = false
-		g.helpPopup = nil
-		return g.Layout(g.g)
+// onPanelWheel scrolls a panel under the mouse without focusing it
+func (g *Gui) onPanelWheel(column string, dir int) error {
+	if isPopupContext(g.currentContext()) {
+		return nil
 	}
-	g.currentColumn = "projects"
-	v, _ := g.g.View("projects")
-	if v == nil {
-		return g.Layout(g.g)
+	if (column == "projects" || column == "databases") && g.currentColumn != column {
+		return nil // collapsed
 	}
-	_, cy := v.Cursor()
-	_, oy := v.Origin()
-	clickedLine := cy + oy
-
-	filtered := g.getFilteredProjects()
-	if clickedLine >= 0 && clickedLine < len(filtered) {
-		g.selectedProjectIndex = clickedLine
-		g.currentProjectInfo = nil
+	ctx := g.panelContext(column)
+	switch ctx {
+	case CtxDetails:
+		g.scrollDetails(3 * dir)
+	case CtxRules, CtxIndexes:
+		g.collectionsScrollPos = max(0, g.collectionsScrollPos+3*dir)
+	default:
+		if sel, n := g.listState(ctx); sel != nil && n > 0 {
+			g.setSelection(ctx, max(0, min(*sel+dir, n-1)))
+		}
 	}
-	return g.Layout(g.g)
+	return nil
 }
 
-func (g *Gui) doCollectionsClick() error {
-	if g.helpOpen {
-		g.helpOpen = false
-		g.helpPopup = nil
-		return g.Layout(g.g)
+// closeDismissablePopup closes the keybindings menu or the command log, which
+// a click outside of them dismisses. Reports whether it closed anything.
+func (g *Gui) closeDismissablePopup() bool {
+	if g.filterInputActive || g.confirmOpen || g.queryModalOpen || (!g.helpOpen && !g.modalOpen) {
+		return false
 	}
-	g.currentColumn = "collections"
-	v, _ := g.g.View("collections")
-	if v == nil {
-		return g.Layout(g.g)
-	}
-	_, cy := v.Cursor()
-	_, oy := v.Origin()
-	clickedLine := cy + oy
-
-	filtered := g.getFilteredCollections()
-	if clickedLine >= 0 && clickedLine < len(filtered) {
-		g.selectedCollectionIdx = clickedLine
-	}
-	return g.Layout(g.g)
+	g.helpOpen = false
+	g.helpPopup = nil
+	g.modalOpen = false
+	_ = g.relayout()
+	return true
 }
 
-func (g *Gui) doTreeClick() error {
-	if g.helpOpen {
-		g.helpOpen = false
-		g.helpPopup = nil
-		return g.Layout(g.g)
-	}
-	g.currentColumn = "tree"
-	v, _ := g.g.View("tree")
-	if v == nil {
-		return g.Layout(g.g)
-	}
-	_, cy := v.Cursor()
-	_, oy := v.Origin()
-	clickedLine := cy + oy
-
-	filtered := g.getFilteredTreeNodes()
-	if clickedLine >= 0 && clickedLine < len(filtered) {
-		g.selectedTreeIdx = clickedLine
-	}
-	return g.Layout(g.g)
+func (g *Gui) onOutsideClick(gocui.ViewMouseBindingOpts) error {
+	g.closeDismissablePopup()
+	return nil
 }
 
-func (g *Gui) doDetailsClick() error {
-	if g.helpOpen {
-		g.helpOpen = false
-		g.helpPopup = nil
-		return g.Layout(g.g)
+// onHelpClick runs the clicked keybindings menu item
+func (g *Gui) onHelpClick(opts gocui.ViewMouseBindingOpts) error {
+	if g.helpPopup == nil || g.currentContext() != CtxMenu {
+		return nil
 	}
-	g.previousColumn = g.currentColumn
-	g.currentColumn = "details"
-	return g.Layout(g.g)
+	visible := g.helpPopup.Visible()
+	if opts.Y < 0 || opts.Y >= len(visible) || visible[opts.Y].IsHeader {
+		return nil
+	}
+	g.helpPopup.SelectedIdx = opts.Y
+	return g.helpExecute()
 }
 
-func (g *Gui) doOutsideClick() error {
-	if g.helpOpen {
-		g.helpOpen = false
-		g.helpPopup = nil
-		return g.Layout(g.g)
+func (g *Gui) onQuerySelectClick(opts gocui.ViewMouseBindingOpts) error {
+	if !g.querySelectOpen || opts.Y < 0 || opts.Y >= len(g.querySelectItems) {
+		return nil
+	}
+	g.querySelectIdx = opts.Y
+	return g.querySelectConfirm()
+}
+
+// onCollectionsTabClick switches to the clicked tab of the collections panel
+func (g *Gui) onCollectionsTabClick(tabIdx int) error {
+	if isPopupContext(g.currentContext()) {
+		return nil
+	}
+	idx := collectionsTabWindowStart(g.collectionsTab) + tabIdx
+	if idx < 0 || idx >= len(collectionsTabs) {
+		return nil
+	}
+	if err := g.switchCollectionsTab(collectionsTabs[idx]); err != nil {
+		return err
+	}
+	return g.setFocus("collections")
+}
+
+// onDetailsTabClick switches between the function Details and Logs tabs
+func (g *Gui) onDetailsTabClick(tabIdx int) error {
+	if isPopupContext(g.currentContext()) || g.detailsSource() != "function" {
+		return nil
+	}
+	if (tabIdx == 1) != (g.detailsTab == "logs") {
+		return g.toggleDetailsTab()
 	}
 	return nil
 }
@@ -1205,35 +860,11 @@ func (g *Gui) updateSelectRange() {
 	}
 }
 
-// selectMoveDown moves down in select mode, extending selection
-func (g *Gui) selectMoveDown() error {
-	if !g.selectMode || g.currentColumn != "tree" {
-		return g.doCursorDown()
-	}
-	filtered := g.getFilteredTreeNodes()
-	if g.selectedTreeIdx < len(filtered)-1 {
-		g.selectedTreeIdx++
-		g.updateSelectRange()
-	}
-	return g.Layout(g.g)
-}
-
-// selectMoveUp moves up in select mode, extending selection
-func (g *Gui) selectMoveUp() error {
-	if !g.selectMode || g.currentColumn != "tree" {
-		return g.doCursorUp()
-	}
-	if g.selectedTreeIdx > 0 {
-		g.selectedTreeIdx--
-		g.updateSelectRange()
-	}
-	return g.Layout(g.g)
-}
-
 // doFetchSelectedDocs fetches all selected documents in parallel
 func (g *Gui) doFetchSelectedDocs() error {
-	if !g.selectMode || len(g.selectedDocs) == 0 {
-		return g.doSpace()
+	gen := g.databaseGen
+	if len(g.selectedDocs) == 0 {
+		return nil
 	}
 
 	filtered := g.getFilteredTreeNodes()
@@ -1252,65 +883,68 @@ func (g *Gui) doFetchSelectedDocs() error {
 		}
 	}
 
-	// If all docs are cached, no need to fetch
-	if len(toFetch) == 0 {
+	showCombined := func() {
 		if len(combined) > 0 {
 			g.currentDocData = combined
 			g.currentDocStats = nil // No stats for combined multi-doc view
 			g.currentDocPath = fmt.Sprintf("%d documents selected", len(combined))
 			g.clearDetailsCache()
-			g.logCommand("cache", fmt.Sprintf("Using %d cached documents", len(combined)), "success")
 		}
-		return g.Layout(g.g)
+	}
+
+	// If all docs are cached, no need to fetch
+	if len(toFetch) == 0 {
+		showCombined()
+		g.logCommand("cache", fmt.Sprintf("Using %d cached documents", len(combined)), "success")
+		return nil
 	}
 
 	g.logCommand("api", fmt.Sprintf("Fetching %d documents (%d cached)...", len(toFetch), len(combined)), "running")
+	g.detailsLoading = true
 
-	// Fetch uncached documents in parallel
+	// Fetch uncached documents in parallel, off the UI thread
 	type result struct {
 		path string
 		data map[string]any
 		err  error
 	}
-
-	results := make([]result, len(toFetch))
-	var wg sync.WaitGroup
-
-	for i, path := range toFetch {
-		wg.Add(1)
-		go func(idx int, docPath string) {
-			defer wg.Done()
-			doc, err := g.firebaseClient.GetDocument(docPath)
-			if err != nil {
-				results[idx] = result{path: docPath, err: err}
-			} else {
-				results[idx] = result{path: docPath, data: doc.Data}
-			}
-		}(i, path)
-	}
-
-	wg.Wait()
-
-	// Add fetched results to combined and cache them
-	for _, r := range results {
-		if r.err != nil {
-			g.logCommand("api", fmt.Sprintf("Error fetching %s: %v", r.path, r.err), "error")
-		} else {
-			combined[r.path] = r.data
-			g.docCache[r.path] = r.data
+	go func() {
+		results := make([]result, len(toFetch))
+		var wg sync.WaitGroup
+		for i, path := range toFetch {
+			wg.Add(1)
+			go func(idx int, docPath string) {
+				defer wg.Done()
+				doc, err := g.firebaseClient.GetDocument(docPath)
+				if err != nil {
+					results[idx] = result{path: docPath, err: err}
+				} else {
+					results[idx] = result{path: docPath, data: doc.Data}
+				}
+			}(i, path)
 		}
-	}
+		wg.Wait()
 
-	if len(combined) > 0 {
-		g.currentDocData = combined
-		g.currentDocStats = nil // No stats for combined multi-doc view
-		g.currentDocPath = fmt.Sprintf("%d documents selected", len(combined))
-		g.clearDetailsCache()
-		g.logCommand("api", fmt.Sprintf("Loaded %d documents", len(combined)), "success")
-	}
-
-	// Stay in select mode - only Esc exits
-	return g.Layout(g.g)
+		g.g.Update(func(gui *gocui.Gui) error {
+			if gen != g.databaseGen {
+				return nil // loaded for another project or database
+			}
+			g.detailsLoading = false
+			for _, r := range results {
+				if r.err != nil {
+					g.logCommand("api", fmt.Sprintf("Error fetching %s: %v", r.path, r.err), "error")
+					continue
+				}
+				combined[r.path] = r.data
+				g.docCache[r.path] = r.data
+			}
+			showCombined()
+			// Stay in select mode - only Esc exits
+			g.logCommand("api", fmt.Sprintf("Loaded %d documents", len(combined)), "success")
+			return nil
+		})
+	}()
+	return nil
 }
 
 // Query builder action handlers
@@ -1322,7 +956,8 @@ func (g *Gui) doOpenQuery() error {
 
 // queryClose closes the query modal
 func (g *Gui) queryClose() error {
-	return g.closeQueryModal()
+	_ = g.closeQueryModal()
+	return g.relayout()
 }
 
 // queryMoveUp moves up in the query modal
@@ -1390,26 +1025,6 @@ func (g *Gui) queryMoveRight() error {
 	return g.Layout(g.g)
 }
 
-// queryKeyJ handles j key in query modal (navigation only)
-func (g *Gui) queryKeyJ() error {
-	return g.queryMoveDown()
-}
-
-// queryKeyK handles k key in query modal (navigation only)
-func (g *Gui) queryKeyK() error {
-	return g.queryMoveUp()
-}
-
-// queryKeyH handles h key in query modal (navigation only)
-func (g *Gui) queryKeyH() error {
-	return g.queryMoveLeft()
-}
-
-// queryKeyL handles l key in query modal (navigation only)
-func (g *Gui) queryKeyL() error {
-	return g.queryMoveRight()
-}
-
 // queryNextField moves to the next field, wrapping to next row at end
 func (g *Gui) queryNextField() error {
 	maxCol := g.getMaxColForRow()
@@ -1434,27 +1049,18 @@ func (g *Gui) queryEnter() error {
 	return g.handleQueryEnter()
 }
 
-// queryBackspace is no longer needed - editable view handles it
-func (g *Gui) queryBackspace() error {
+// queryAddFilter adds a filter row in the query modal
+func (g *Gui) queryAddFilter() error {
+	g.addQueryFilter()
 	return nil
 }
 
-// queryInsertChar is no longer needed for text input - editable view handles it
-// Only handles special action keys when not in edit mode
-func (g *Gui) queryInsertChar(ch rune) func() error {
-	return func() error {
-		switch ch {
-		case 'a':
-			g.addQueryFilter()
-			return g.Layout(g.g)
-		case 'd':
-			if g.queryActiveRow == queryRowFilters && len(g.queryFilters) > 0 {
-				g.removeQueryFilter()
-			}
-			return g.Layout(g.g)
-		}
-		return nil
+// queryDeleteFilter removes the selected filter row in the query modal
+func (g *Gui) queryDeleteFilter() error {
+	if g.queryActiveRow == queryRowFilters && len(g.queryFilters) > 0 {
+		g.removeQueryFilter()
 	}
+	return nil
 }
 
 // Query select popup handlers
@@ -1552,7 +1158,11 @@ func (g *Gui) executeScan() {
 				return
 			}
 			g.g.Update(func(gui *gocui.Gui) error {
-				g.currentProject = projectID
+				g.resetProjectState(projectID)
+				// The scan fills the collections tab; other tabs load now
+				if g.collectionsTab != "collections" {
+					g.loadActiveTab()
+				}
 				return nil
 			})
 		}
@@ -1828,20 +1438,7 @@ func parseMetricLine(m string) (name, value, limit, pct string) {
 
 func (g *Gui) copyScanReport() error {
 	text := g.formatScanReportMarkdown()
-
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("pbcopy")
-	case "linux":
-		cmd = exec.Command("xclip", "-selection", "clipboard")
-	default:
-		g.logCommand("copy", "Clipboard not supported on this platform", "error")
-		return nil
-	}
-
-	cmd.Stdin = strings.NewReader(text)
-	if err := cmd.Run(); err != nil {
+	if err := copyToClipboard(text); err != nil {
 		g.logCommand("copy", fmt.Sprintf("Failed to copy: %v", err), "error")
 		return nil
 	}
@@ -2002,106 +1599,123 @@ func (g *Gui) doFieldTypeAnalysis() error {
 	return nil
 }
 
-// doNextSearchMatch scrolls to next filter match in details
+// doNextSearchMatch moves the details cursor to the next line matching the filter
 func (g *Gui) doNextSearchMatch() error {
-	if g.currentColumn != "details" {
-		return nil
-	}
-	filter := g.getDetailsFilter()
-	if filter == "" || strings.HasPrefix(filter, ".") {
-		return nil
-	}
-	if g.cachedDetailsLines == nil {
-		return nil
-	}
-
-	lowerFilter := strings.ToLower(filter)
-	startLine := g.detailsCursorLine + 1
-	for i := 0; i < len(g.cachedDetailsLines); i++ {
-		idx := (startLine + i) % len(g.cachedDetailsLines)
-		if strings.Contains(strings.ToLower(g.cachedDetailsLines[idx]), lowerFilter) {
-			g.detailsCursorLine = idx
-			g.detailsScrollPos = idx
-			return g.Layout(g.g)
-		}
-	}
-	g.logCommand("search", "No more matches", "error")
-	return nil
+	return g.jumpToMatch(1)
 }
 
-// doPrevSearchMatch scrolls to previous filter match in details
+// doPrevSearchMatch moves the details cursor to the previous matching line
 func (g *Gui) doPrevSearchMatch() error {
-	if g.currentColumn != "details" {
-		return nil
-	}
-	filter := g.getDetailsFilter()
-	if filter == "" || strings.HasPrefix(filter, ".") {
-		return nil
-	}
-	if g.cachedDetailsLines == nil {
-		return nil
-	}
+	return g.jumpToMatch(-1)
+}
 
-	lowerFilter := strings.ToLower(filter)
-	startLine := g.detailsCursorLine - 1
-	if startLine < 0 {
-		startLine = len(g.cachedDetailsLines) - 1
-	}
-	for i := 0; i < len(g.cachedDetailsLines); i++ {
-		idx := (startLine - i + len(g.cachedDetailsLines)) % len(g.cachedDetailsLines)
-		if strings.Contains(strings.ToLower(g.cachedDetailsLines[idx]), lowerFilter) {
-			g.detailsCursorLine = idx
-			g.detailsScrollPos = idx
-			return g.Layout(g.g)
+func (g *Gui) jumpToMatch(dir int) error {
+	lines := g.detailsViewLines()
+	filter := strings.ToLower(g.getDetailsFilter())
+	n := len(lines)
+	for i := 1; i <= n; i++ {
+		idx := ((g.detailsCursor+dir*i)%n + n) % n
+		if strings.Contains(strings.ToLower(lines[idx]), filter) {
+			g.setDetailsCursor(idx)
+			return nil
 		}
 	}
-	g.logCommand("search", "No more matches", "error")
+	g.toast("No matches", true)
 	return nil
 }
 
-// doCopyFieldValue copies the JSON value of the field at the current scroll position
+// detailsViewLines returns the text of each (wrapped) line shown in details
+func (g *Gui) detailsViewLines() []string {
+	if g.g == nil {
+		return nil
+	}
+	v, err := g.g.View(g.views.details)
+	if err != nil {
+		return nil
+	}
+	return v.ViewBufferLines()
+}
+
+// detailsCursorLine returns the full, unwrapped content line under the cursor
+func (g *Gui) detailsCursorLine() string {
+	if g.g == nil {
+		return ""
+	}
+	v, err := g.g.View(g.views.details)
+	if err != nil {
+		return ""
+	}
+	_, oy := v.Origin()
+	line, _ := v.Line(g.detailsCursor - oy)
+	return line
+}
+
+// cursorLineValue returns the value on the details cursor line
+func (g *Gui) cursorLineValue() string {
+	line := g.detailsCursorLine()
+	switch source := g.detailsSource(); {
+	case source == "document":
+		return extractJSONLineValue(line, g.showLineNumbers, g.humanizeTimestamps)
+	case source == "function" && g.detailsTab == "logs":
+		return strings.TrimSpace(line)
+	case source == "function", source == "storage", source == "auth", source == "info":
+		return extractInfoLineValue(line)
+	}
+	return strings.TrimSpace(line)
+}
+
+var (
+	lineNumberPrefix = regexp.MustCompile(`^\s*\d+ `)
+	jsonKeyValue     = regexp.MustCompile(`^"(?:[^"\\]|\\.)*":\s*(.*)$`)
+	infoKeyValue     = regexp.MustCompile(`^[A-Za-z][A-Za-z -]*:\s+(.+)$`)
+)
+
+// extractJSONLineValue returns the value of a pretty-printed JSON line:
+// `"name": "Alice",` gives `Alice`. Lines that only open or close an object
+// or array have no single-line value and give "".
+func extractJSONLineValue(line string, hasLineNumbers, hasTimestampNotes bool) string {
+	if hasLineNumbers {
+		line = lineNumberPrefix.ReplaceAllString(line, "")
+	}
+	if hasTimestampNotes {
+		if i := strings.Index(line, "  // "); i >= 0 {
+			line = line[:i]
+		}
+	}
+	line = strings.TrimSpace(line)
+	if m := jsonKeyValue.FindStringSubmatch(line); m != nil {
+		line = m[1]
+	}
+	line = strings.TrimSuffix(line, ",")
+	switch line {
+	case "", "{", "}", "[", "]":
+		return ""
+	}
+	var s string
+	if strings.HasPrefix(line, `"`) && json.Unmarshal([]byte(line), &s) == nil {
+		return s
+	}
+	return line
+}
+
+// extractInfoLineValue returns the value of a "Label:   value" line, or the
+// whole line when it has no label
+func extractInfoLineValue(line string) string {
+	line = strings.TrimSpace(line)
+	if m := infoKeyValue.FindStringSubmatch(line); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	return line
+}
+
+// doCopyFieldValue copies the value on the details cursor line
 func (g *Gui) doCopyFieldValue() error {
-	if g.currentColumn != "details" || g.currentDocData == nil {
+	value := g.cursorLineValue()
+	if value == "" {
+		g.toast("No single-line value here (c copies the whole JSON)", true)
 		return nil
 	}
-	if g.cachedDetailsLines == nil || len(g.cachedDetailsLines) == 0 {
-		return nil
-	}
-
-	// Get the line at current scroll position
-	lineIdx := g.detailsScrollPos
-	if lineIdx >= len(g.cachedDetailsLines) {
-		lineIdx = len(g.cachedDetailsLines) - 1
-	}
-	if lineIdx < 0 {
-		lineIdx = 0
-	}
-
-	line := strings.TrimSpace(g.cachedDetailsLines[lineIdx])
-	if line == "" || line == "{" || line == "}" || line == "[" || line == "]" {
-		g.logCommand("copy", "No field value on this line", "error")
-		return nil
-	}
-
-	// Extract value after the colon (for key: value lines)
-	value := line
-	if colonIdx := strings.Index(line, ": "); colonIdx >= 0 {
-		value = strings.TrimSpace(line[colonIdx+2:])
-		value = strings.TrimSuffix(value, ",")
-	}
-
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("pbcopy")
-	case "linux":
-		cmd = exec.Command("xclip", "-selection", "clipboard")
-	default:
-		g.logCommand("copy", "Clipboard not supported", "error")
-		return nil
-	}
-	cmd.Stdin = strings.NewReader(value)
-	if err := cmd.Run(); err != nil {
+	if err := copyToClipboard(value); err != nil {
 		g.logCommand("copy", fmt.Sprintf("Failed: %v", err), "error")
 		return nil
 	}
@@ -2112,34 +1726,6 @@ func (g *Gui) doCopyFieldValue() error {
 	}
 	g.logCommand("copy", fmt.Sprintf("Copied value: %s", display), "success")
 	return nil
-}
-
-// doFocusCommands focuses the command log panel
-func (g *Gui) doFocusCommands() error {
-	if g.modalOpen || g.helpOpen {
-		return nil
-	}
-	g.modalOpen = true
-	return g.Layout(g.g)
-}
-
-// doFastScrollDown scrolls details 5 lines down (J)
-func (g *Gui) doFastScrollDown() error {
-	if g.currentColumn == "details" {
-		g.detailsScrollPos += 5
-	}
-	return g.Layout(g.g)
-}
-
-// doFastScrollUp scrolls details 5 lines up (K)
-func (g *Gui) doFastScrollUp() error {
-	if g.currentColumn == "details" {
-		g.detailsScrollPos -= 5
-		if g.detailsScrollPos < 0 {
-			g.detailsScrollPos = 0
-		}
-	}
-	return g.Layout(g.g)
 }
 
 // doToggleLineNumbers toggles line numbers in details JSON view
@@ -2218,183 +1804,86 @@ func (g *Gui) doCollectionMemoryEstimate() error {
 	return nil
 }
 
-// doToggleBase64Decode toggles inline base64 decoding for string values
+// doToggleBase64Decode decodes the base64 string on the details cursor line
 func (g *Gui) doToggleBase64Decode() error {
-	if g.currentColumn != "details" || g.currentDocData == nil {
-		return nil
+	value := g.cursorLineValue()
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		decoded, err = base64.RawStdEncoding.DecodeString(value)
 	}
-	if g.cachedDetailsLines == nil || len(g.cachedDetailsLines) == 0 {
+	if value == "" || err != nil || len(decoded) == 0 {
+		g.toast("No base64 string on this line", true)
 		return nil
 	}
 
-	lineIdx := g.detailsScrollPos
-	if lineIdx >= len(g.cachedDetailsLines) {
-		lineIdx = len(g.cachedDetailsLines) - 1
+	display := string(decoded)
+	if len(display) > 100 {
+		display = display[:97] + "..."
 	}
-	if lineIdx < 0 {
-		lineIdx = 0
-	}
-
-	line := g.cachedDetailsLines[lineIdx]
-	// Try to find a base64-encoded string value
-	if idx := strings.Index(line, `": "`); idx >= 0 {
-		rest := line[idx+4:]
-		endIdx := strings.LastIndex(rest, `"`)
-		if endIdx > 0 {
-			val := rest[:endIdx]
-			decoded, err := base64.StdEncoding.DecodeString(val)
-			if err != nil {
-				decoded, err = base64.RawStdEncoding.DecodeString(val)
-			}
-			if err == nil && len(decoded) > 0 {
-				display := string(decoded)
-				if len(display) > 100 {
-					display = display[:97] + "..."
-				}
-				// Check if decoded content is printable
-				printable := true
-				for _, b := range decoded {
-					if b < 0x20 && b != '\n' && b != '\r' && b != '\t' {
-						printable = false
-						break
-					}
-				}
-				if printable {
-					g.logCommand("base64", fmt.Sprintf("Decoded: %s", display), "success")
-				} else {
-					g.logCommand("base64", fmt.Sprintf("Binary data, %d bytes", len(decoded)), "success")
-				}
-				return nil
-			}
+	// Check if decoded content is printable
+	printable := true
+	for _, b := range decoded {
+		if b < 0x20 && b != '\n' && b != '\r' && b != '\t' {
+			printable = false
+			break
 		}
 	}
-
-	g.logCommand("base64", "No base64 string found on this line", "error")
+	if printable {
+		g.logCommand("base64", fmt.Sprintf("Decoded: %s", display), "success")
+	} else {
+		g.logCommand("base64", fmt.Sprintf("Binary data, %d bytes", len(decoded)), "success")
+	}
 	return nil
 }
 
-// pageUpCollections moves up N items in the collections panel based on current tab
-func (g *Gui) pageUpCollections(n int) {
-	switch g.collectionsTab {
-	case "functions":
-		g.selectedFunctionIdx -= n
-		if g.selectedFunctionIdx < 0 {
-			g.selectedFunctionIdx = 0
-		}
-	case "storage":
-		if g.currentBucket == "" {
-			g.selectedBucketIdx -= n
-			if g.selectedBucketIdx < 0 {
-				g.selectedBucketIdx = 0
-			}
-		} else {
-			g.selectedObjectIdx -= n
-			if g.selectedObjectIdx < 0 {
-				g.selectedObjectIdx = 0
-			}
-		}
-	case "auth":
-		g.selectedAuthIdx -= n
-		if g.selectedAuthIdx < 0 {
-			g.selectedAuthIdx = 0
-		}
-	default:
-		g.selectedCollectionIdx -= n
-		if g.selectedCollectionIdx < 0 {
-			g.selectedCollectionIdx = 0
-		}
-	}
-}
-
-// pageDownCollections moves down N items in the collections panel based on current tab
-func (g *Gui) pageDownCollections(n int) {
-	switch g.collectionsTab {
-	case "functions":
-		filtered := g.getFilteredFunctions()
-		g.selectedFunctionIdx += n
-		if g.selectedFunctionIdx >= len(filtered) {
-			g.selectedFunctionIdx = len(filtered) - 1
-		}
-		if g.selectedFunctionIdx < 0 {
-			g.selectedFunctionIdx = 0
-		}
-	case "storage":
-		if g.currentBucket == "" {
-			g.selectedBucketIdx += n
-			if g.selectedBucketIdx >= len(g.storageBuckets) {
-				g.selectedBucketIdx = len(g.storageBuckets) - 1
-			}
-			if g.selectedBucketIdx < 0 {
-				g.selectedBucketIdx = 0
-			}
-		} else {
-			g.selectedObjectIdx += n
-			if g.selectedObjectIdx >= len(g.storageObjects) {
-				g.selectedObjectIdx = len(g.storageObjects) - 1
-			}
-			if g.selectedObjectIdx < 0 {
-				g.selectedObjectIdx = 0
-			}
-		}
-	case "auth":
-		g.selectedAuthIdx += n
-		if g.selectedAuthIdx >= len(g.authUsers) {
-			g.selectedAuthIdx = len(g.authUsers) - 1
-		}
-		if g.selectedAuthIdx < 0 {
-			g.selectedAuthIdx = 0
-		}
-	default:
-		filtered := g.getFilteredCollections()
-		g.selectedCollectionIdx += n
-		if g.selectedCollectionIdx >= len(filtered) {
-			g.selectedCollectionIdx = len(filtered) - 1
-		}
-		if g.selectedCollectionIdx < 0 {
-			g.selectedCollectionIdx = 0
-		}
-	}
-}
-
-// doSelectStorageItem handles space/enter for storage tab
+// doSelectStorageItem opens the selected bucket or folder
 func (g *Gui) doSelectStorageItem() error {
 	if g.currentBucket == "" {
-		// Select a bucket
-		if g.selectedBucketIdx < len(g.storageBuckets) {
-			g.currentBucket = g.storageBuckets[g.selectedBucketIdx].Name
+		buckets := g.getFilteredBuckets()
+		if g.selectedBucketIdx < len(buckets) {
+			g.currentBucket = buckets[g.selectedBucketIdx].Name
 			g.storagePrefix = ""
 			g.storagePrefixStack = nil
-			g.loadStorageObjects()
+			g.storageFilter = ""
+			g.selectedObjectIdx = 0
+			g.loadStorageObjects("")
 		}
-	} else {
-		// Navigate into folder or select object
-		if g.selectedObjectIdx < len(g.storageObjects) {
-			obj := g.storageObjects[g.selectedObjectIdx]
-			if obj.IsPrefix {
-				g.storagePrefixStack = append(g.storagePrefixStack, g.storagePrefix)
-				g.storagePrefix = obj.Name
-				g.loadStorageObjects()
-			}
+		return nil
+	}
+
+	objects := g.getFilteredObjects()
+	if g.selectedObjectIdx < len(objects) {
+		obj := objects[g.selectedObjectIdx]
+		if obj.IsPrefix {
+			g.storagePrefixStack = append(g.storagePrefixStack, g.storagePrefix)
+			g.storagePrefix = obj.Name
+			g.storageFilter = ""
+			g.selectedObjectIdx = 0
+			g.loadStorageObjects("")
 		}
 	}
-	return g.Layout(g.g)
+	return nil
 }
 
-// doStorageBack goes up one level in storage navigation (Esc or Backspace)
+// doStorageBack goes up one folder, or back to the bucket list, keeping the
+// folder or bucket we came from selected
 func (g *Gui) doStorageBack() error {
+	g.storageFilter = ""
+	g.storageLoading = false // a folder still loading is dropped when it arrives
 	if g.storagePrefix != "" {
-		// Go up one folder level
+		leaving := g.storagePrefix
 		if len(g.storagePrefixStack) > 0 {
 			g.storagePrefix = g.storagePrefixStack[len(g.storagePrefixStack)-1]
 			g.storagePrefixStack = g.storagePrefixStack[:len(g.storagePrefixStack)-1]
 		} else {
 			g.storagePrefix = ""
 		}
-		g.loadStorageObjects()
+		g.loadStorageObjects(leaving)
 	} else if g.currentBucket != "" {
-		// Go back to bucket list
+		leaving := g.currentBucket
 		g.currentBucket = ""
 		g.storageObjects = nil
+		g.selectItemByKey(CtxStorage, leaving)
 	}
-	return g.Layout(g.g)
+	return nil
 }

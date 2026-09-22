@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-22
+
+### Added
+- **Multiple Firestore databases** - New Databases panel under Projects lists the project's databases (`2` to focus, `Space` to use one, `Enter` to use it and jump to collections)
+  - Collections, documents, queries, subcollections, the health scan and the Indexes tab use the selected database
+  - Collapsed, the panel shows the database in use; named databases also appear in the breadcrumb
+  - Falls back to the default database if the list can't be loaded; Datastore mode databases are listed but can't be browsed
+- **Context-aware keybindings** (lazygit style) - Every key belongs to a panel, tab or popup, so the same key does the right thing where you are (e.g. `Space` selects a project, opens a bucket on the Storage tab, shows the user on the Auth tab)
+- **Keybindings menu** - `?` lists the keys for the focused panel, grouped into panel actions, navigation and global keys
+  - `/` filters the menu, `Enter` runs the selected key
+  - Keys that can't run right now are dimmed with the reason
+- **Generated options bar** - The bottom bar shows the keys that work in the focused panel and tab, trimmed to the terminal width with `? help` always visible
+- **Disabled key messages** - Pressing a key that can't run shows why (e.g. "No document open") instead of doing nothing
+- **Details cursor** - A highlighted line in Details that `j`/`k` move; `y` copies the value on it and `B` decodes base64 on it
+- **Filtering on Storage and Auth tabs** - `/` now filters buckets, objects and users
+- **Mouse support** - Wheel scrolls lists and Details, clicking a tab title switches tabs, double click opens an item
+- `Q` clears query results in the tree
+- `Enter` on a collection opens it and focuses the tree
+- `r` now refreshes every tab (functions, storage, auth, rules, indexes), reloads the open document in Details, and re-runs the query when showing query results
+- `Backspace` goes up one level on the Storage tab
+- `Tab` in Details goes back to the previous panel, like `Esc`
+- Rules and indexes are shown in full in the Details panel, and the Rules/Indexes tabs scroll with `j`/`k`
+- "No matches" hint when a filter hides every item
+
+### Changed
+- The filter prompt is a real text input: every key types (including `q`, `j`, `Q`, `U` and non-ASCII), with cursor movement, `Ctrl+w`/`Ctrl+u` and paste
+- `↑`/`↓` move through matches while typing a filter
+- `Esc` clears a kept filter before going back (Details, Storage)
+- Clearing a filter keeps the selected item selected, and keeping a filter no longer jumps back to the first match
+- Page up/down and `Ctrl+d`/`Ctrl+u` use the real panel height
+- Panel navigation follows lazygit: `Tab`/`Shift+Tab` cycle the left panels like `→`/`←`, `0` focuses Details, and `1`-`4` focus the left panels in screen order (Projects, Databases, Collections, Tree), also from Details
+- The command log opens with `@` only
+- `L` (log level) only applies to functions
+- `F` in the collections panel queries the highlighted collection
+- The collapsed Projects panel shows the active project
+- Going up a storage folder keeps the folder you came from selected
+- Refreshing a list keeps the current selection
+- Switching projects clears the previous project's cached documents and filters
+- Function Details/Logs use real tabs in the panel title
+
+### Fixed
+- Filter could not type `Q`, `U` or non-ASCII characters
+- `Esc` while typing a filter in Details left the panel with the prompt still open; on Storage it went up a folder instead of cancelling
+- `Space` on the Auth, Rules or Indexes tabs loaded a Firestore collection into the tree
+- `r` on the Storage, Auth, Rules or Indexes tabs refreshed Firestore collections instead
+- Refreshing projects froze the UI
+- Clicking a row on the Functions, Storage or Auth tabs selected the wrong item
+- Clicking the collapsed Projects panel jumped to the first project
+- `Esc` stopped working in Details after clicking Details twice
+- `G`/`End` in Details scrolled to a blank screen, and scrolling could go past the end
+- `y` and `B` read the wrong line in Details
+- `n`/`N` jumped to the wrong place while a filter was active
+- `Enter` on an expanded document collapsed it; on a subcollection it showed the previous document
+- Fetching selected documents and copying a document from the tree froze the UI
+- `T` did not annotate timestamps on normal `"field": "timestamp"` lines
+- The cached document count never showed next to top-level collections
+- Documents cached for one project showed up in another project with the same paths
+- Clearing a Details filter could leave the filtered text on screen
+- The right side of the bottom bar (version, messages) was cut off by two characters
+- Late responses could overwrite newer state (subcollections inserted under the wrong node, logs of a previous function, a storage folder you already left, loads from the previous project)
+- `c` was advertised in the collections panel but did nothing
+
 ## [0.1.41] - 2026-03-23
 
 ### Added

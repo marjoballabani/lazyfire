@@ -2,779 +2,335 @@ package gui
 
 import "github.com/jesseduffield/gocui"
 
-func (g *Gui) setKeybindings() error {
-	km := g.newKeybindingManager()
+// getBindings defines every keybinding. Order matters: for a given key and
+// context the first active binding wins, so state-specific bindings (those
+// with When) come before the general ones they override.
+func (g *Gui) getBindings() []*Binding {
+	sidePanels := []Context{CtxProjects, CtxDatabases, CtxCollections, CtxFunctions, CtxStorage, CtxAuth, CtxRules, CtxIndexes, CtxTree}
+	panels := append(append([]Context{}, sidePanels...), CtxDetails)
+	filterable := []Context{CtxProjects, CtxDatabases, CtxCollections, CtxFunctions, CtxStorage, CtxAuth, CtxTree, CtxDetails}
+	isSelectMode := func() bool { return g.selectMode }
+	isInBucket := func() bool { return g.currentBucket != "" }
+	isFunctionDetails := func() bool { return g.detailsSource() == "function" }
+	hasFilterHere := func() bool { return g.getCommittedFilter(g.focusedPanel()) != "" }
 
-	// Define all bindings
-	km.RegisterAll(g.globalBindings(km))
-	km.RegisterAll(g.navigationBindings(km))
-	km.RegisterAll(g.filterBindings(km))
-	km.RegisterAll(g.actionBindings(km))
-	km.RegisterAll(g.mouseBindings())
-
-	return km.Apply()
-}
-
-// globalBindings - always available (quit, escape, help)
-func (g *Gui) globalBindings(km *KeybindingManager) []*Binding {
 	return []*Binding{
-		{
-			Key:         gocui.KeyCtrlC,
-			Handler:     g.doQuit,
-			Description: "Force quit",
-		},
-		{
-			Key:         'q',
-			Handler:     g.doQuit,
-			Description: "Quit",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertQ,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('q'),
-			},
-		},
-		{
-			Key:         gocui.KeyEsc,
-			Handler:     g.doEscape,
-			Description: "Close/Cancel",
-			Contexts: map[Context]func() error{
-				ContextQuery:       g.queryClose,
-				ContextQuerySelect: g.querySelectClose,
-				ContextConfirm:     g.doConfirmCancel,
-			},
-		},
-		{
-			Key:         '?',
-			Handler:     g.doToggleHelp,
-			Description: "Show help",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertQuestion,
-				ContextQuery:  g.queryInsertChar('?'),
-			},
-		},
-		{
-			Key:         '@',
-			Handler:     g.doToggleModal,
-			Description: "Command log",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertAt,
-				ContextQuery:  g.queryInsertChar('@'),
-			},
-		},
+		// Global
+		{Keys: []any{gocui.KeyCtrlC}, Handler: g.doQuit, Description: "Quit", AllowInPopup: true},
+		{Keys: []any{'q'}, Handler: g.doQuit, Description: "Quit", Short: "quit"},
+		{Keys: []any{'?'}, Handler: g.doToggleHelp, Description: "Keybindings", Short: "help"},
+		{Keys: []any{'@'}, Handler: g.doToggleModal, Description: "Command log"},
+		{Keys: []any{'1'}, Handler: g.jumpTo("projects"), Description: "Focus projects"},
+		{Keys: []any{'2'}, Handler: g.jumpTo("databases"), Description: "Focus databases"},
+		{Keys: []any{'3'}, Handler: g.jumpTo("collections"), Description: "Focus collections"},
+		{Keys: []any{'4'}, Handler: g.jumpTo("tree"), Description: "Focus tree"},
+		{Keys: []any{'0'}, Handler: g.focusDetails, Description: "Focus details"},
+		{Keys: []any{'T'}, Handler: g.doToggleTimestamps, Description: "Toggle human-readable timestamps"},
+		{Keys: []any{'x'}, Handler: g.doExportCachedDocs, Description: "Export cached documents to ~/Downloads", GetDisabledReason: g.noCachedDocsReason},
+		{Keys: []any{'A'}, Handler: g.doFieldTypeAnalysis, Description: "Field type analysis (cached docs)", GetDisabledReason: g.noCollectionReason},
+		{Keys: []any{'M'}, Handler: g.doCollectionMemoryEstimate, Description: "Collection memory estimate", GetDisabledReason: g.noCollectionReason},
+		{Keys: []any{'i'}, Handler: g.doShowCacheStats, Description: "Cache statistics"},
+		{Keys: []any{'R'}, Handler: g.doClearCache, Description: "Clear cache"},
+
+		// Navigation
+		{Keys: []any{'k', gocui.KeyArrowUp}, Contexts: panels, Tag: tagNavigation, Handler: func() error { return g.moveBy(-1) }, Description: "Move up"},
+		{Keys: []any{'j', gocui.KeyArrowDown}, Contexts: panels, Tag: tagNavigation, Handler: func() error { return g.moveBy(1) }, Description: "Move down", Short: "move", ShortKey: "j/k"},
+		{Keys: []any{gocui.KeyPgup}, Contexts: panels, Tag: tagNavigation, Handler: func() error { return g.moveBy(-g.pageSize()) }, Description: "Page up"},
+		{Keys: []any{gocui.KeyPgdn}, Contexts: panels, Tag: tagNavigation, Handler: func() error { return g.moveBy(g.pageSize()) }, Description: "Page down"},
+		{Keys: []any{gocui.KeyCtrlU}, Contexts: panels, Tag: tagNavigation, Handler: func() error { return g.moveBy(-g.halfPageSize()) }, Description: "Half page up"},
+		{Keys: []any{gocui.KeyCtrlD}, Contexts: panels, Tag: tagNavigation, Handler: func() error { return g.moveBy(g.halfPageSize()) }, Description: "Half page down"},
+		{Keys: []any{'K'}, Contexts: []Context{CtxDetails}, Tag: tagNavigation, Handler: func() error { return g.moveBy(-5) }, Description: "Up 5 lines"},
+		{Keys: []any{'J'}, Contexts: []Context{CtxDetails}, Tag: tagNavigation, Handler: func() error { return g.moveBy(5) }, Description: "Down 5 lines"},
+		{Keys: []any{'g', gocui.KeyHome}, Contexts: panels, Tag: tagNavigation, Handler: g.moveToTop, Description: "Go to top"},
+		{Keys: []any{'G', gocui.KeyEnd}, Contexts: panels, Tag: tagNavigation, Handler: g.moveToBottom, Description: "Go to bottom"},
+		{Keys: []any{'h', gocui.KeyArrowLeft, gocui.KeyBacktab}, Contexts: sidePanels, Tag: tagNavigation, Handler: g.doColumnLeft, Description: "Previous panel"},
+		{Keys: []any{'l', gocui.KeyArrowRight, gocui.KeyTab}, Contexts: sidePanels, Tag: tagNavigation, Handler: g.doColumnRight, Description: "Next panel", Short: "panels", ShortKey: "tab"},
+		{Keys: []any{gocui.KeyTab, gocui.KeyBacktab}, Contexts: []Context{CtxDetails}, Tag: tagNavigation, Handler: g.doBackFromDetails, Description: "Back to previous panel"},
+		{Keys: []any{'['}, Contexts: collectionsTabContexts, Tag: tagNavigation, Handler: g.doSwitchTabPrev, Description: "Previous tab"},
+		{Keys: []any{']'}, Contexts: collectionsTabContexts, Tag: tagNavigation, Handler: g.doSwitchTabNext, Description: "Next tab", Short: "tabs", ShortKey: "[/]"},
+		{Keys: []any{'['}, Contexts: []Context{CtxDetails}, When: isFunctionDetails, Tag: tagNavigation, Handler: g.doSwitchTabPrev, Description: "Previous tab"},
+		{Keys: []any{']'}, Contexts: []Context{CtxDetails}, When: isFunctionDetails, Tag: tagNavigation, Handler: g.doSwitchTabNext, Description: "Next tab", Short: "details/logs", ShortKey: "[/]"},
+
+		// Escape: select mode, then filter, then panel-specific back
+		{Keys: []any{gocui.KeyEsc}, Contexts: []Context{CtxTree}, When: isSelectMode, Handler: g.doExitSelectMode, Description: "Exit select mode", Short: "cancel"},
+		{Keys: []any{gocui.KeyEsc}, Contexts: filterable, When: hasFilterHere, Handler: g.doClearFilter, Description: "Clear filter", Short: "clear filter"},
+		{Keys: []any{gocui.KeyEsc}, Contexts: []Context{CtxDetails}, Handler: g.doBackFromDetails, Description: "Back to previous panel", Short: "back"},
+		{Keys: []any{gocui.KeyEsc, gocui.KeyBackspace, gocui.KeyBackspace2}, Contexts: []Context{CtxStorage}, When: isInBucket, Handler: g.doStorageBack, Description: "Go up one level", Short: "back"},
+
+		// Projects
+		{Keys: []any{gocui.KeySpace}, Contexts: []Context{CtxProjects}, Handler: g.selectProject, Description: "Select project", Short: "select", GetDisabledReason: g.noItemReason},
+		{Keys: []any{gocui.KeyEnter}, Contexts: []Context{CtxProjects}, Handler: g.fetchProjectDetails, Description: "Show project details", GetDisabledReason: g.noItemReason},
+		{Keys: []any{'S'}, Contexts: []Context{CtxProjects}, Handler: g.doScanCollections, Description: "Scan collections health", Short: "scan", GetDisabledReason: g.scanDisabledReason},
+
+		// Databases
+		{Keys: []any{gocui.KeySpace}, Contexts: []Context{CtxDatabases}, Handler: g.selectDatabase, Description: "Use database", Short: "select", GetDisabledReason: g.databaseDisabledReason},
+		{Keys: []any{gocui.KeyEnter}, Contexts: []Context{CtxDatabases}, Handler: g.openDatabase, Description: "Use database and focus collections", GetDisabledReason: g.databaseDisabledReason},
+
+		// Collections tab
+		{Keys: []any{gocui.KeySpace}, Contexts: []Context{CtxCollections}, Handler: g.selectCollection, Description: "Open collection", Short: "open", GetDisabledReason: g.noItemReason},
+		{Keys: []any{gocui.KeyEnter}, Contexts: []Context{CtxCollections}, Handler: g.openCollection, Description: "Open collection and focus tree", GetDisabledReason: g.noItemReason},
+
+		// Functions tab
+		{Keys: []any{gocui.KeySpace}, Contexts: []Context{CtxFunctions}, Handler: g.selectFunction, Description: "Select function", Short: "select", GetDisabledReason: g.noItemReason},
+		{Keys: []any{gocui.KeyEnter}, Contexts: []Context{CtxFunctions}, Handler: g.openFunction, Description: "Open function details", GetDisabledReason: g.noItemReason},
+		{Keys: []any{'L'}, Contexts: []Context{CtxFunctions, CtxDetails}, When: isFunctionDetails, Handler: g.doCycleLogLevel, Description: "Cycle log level filter"},
+
+		// Storage tab
+		{Keys: []any{gocui.KeySpace, gocui.KeyEnter}, Contexts: []Context{CtxStorage}, Handler: g.doSelectStorageItem, Description: "Open bucket / folder", Short: "open", GetDisabledReason: g.noItemReason},
+
+		// Auth tab
+		{Keys: []any{gocui.KeySpace, gocui.KeyEnter}, Contexts: []Context{CtxAuth}, Handler: g.focusDetails, Description: "View user in details", Short: "details", GetDisabledReason: g.noItemReason},
+
+		// Rules / Indexes tabs
+		{Keys: []any{gocui.KeyEnter}, Contexts: []Context{CtxRules, CtxIndexes}, Handler: g.focusDetails, Description: "View in details", Short: "view"},
+
+		// Tree
+		{Keys: []any{gocui.KeySpace}, Contexts: []Context{CtxTree}, When: isSelectMode, Handler: g.doFetchSelectedDocs, Description: "Fetch selected documents", Short: "fetch"},
+		{Keys: []any{gocui.KeySpace}, Contexts: []Context{CtxTree}, Handler: g.selectTreeNode, Description: "Expand / collapse", Short: "expand", GetDisabledReason: g.noItemReason},
+		{Keys: []any{gocui.KeyEnter}, Contexts: []Context{CtxTree}, Handler: g.openTreeNode, Description: "Open document / expand collection", Short: "open", GetDisabledReason: g.noItemReason},
+		{Keys: []any{'v'}, Contexts: []Context{CtxTree}, Handler: g.doToggleSelectMode, Description: "Toggle select mode", Short: "select"},
+		{Keys: []any{'C'}, Contexts: []Context{CtxTree}, Handler: g.doCollapseAll, Description: "Collapse all"},
+		{Keys: []any{'Q'}, Contexts: []Context{CtxTree}, Handler: g.doClearQueryResults, Description: "Clear query results", Short: "clear query", GetDisabledReason: g.noQueryResultsReason},
+
+		// Shared panel actions
+		{Keys: []any{'/'}, Contexts: filterable, Handler: g.doStartFilter, Description: "Filter", Short: "filter", GetDisabledReason: g.filterDisabledReason},
+		{Keys: []any{'r'}, Contexts: panels, Handler: g.doRefresh, Description: "Refresh", Short: "refresh", GetDisabledReason: g.refreshDisabledReason},
+		{Keys: []any{'F'}, Contexts: []Context{CtxCollections, CtxTree}, Handler: g.doOpenQuery, Description: "Query builder", Short: "query", GetDisabledReason: g.noCollectionForQueryReason},
+		{Keys: []any{'c'}, Contexts: []Context{CtxTree, CtxDetails}, Handler: g.doCopyJSON, Description: "Copy JSON to clipboard", Short: "copy", GetDisabledReason: g.copyDisabledReason},
+		{Keys: []any{'s'}, Contexts: []Context{CtxTree, CtxDetails}, Handler: g.doSaveJSON, Description: "Save JSON to ~/Downloads", GetDisabledReason: g.copyDisabledReason},
+		{Keys: []any{'p'}, Contexts: []Context{CtxTree, CtxDetails}, Handler: g.doCopyPath, Description: "Copy path to clipboard", GetDisabledReason: g.copyPathDisabledReason},
+
+		// Details
+		{Keys: []any{'y'}, Contexts: []Context{CtxDetails}, Handler: g.doCopyFieldValue, Description: "Copy value on cursor line", Short: "copy value"},
+		{Keys: []any{'B'}, Contexts: []Context{CtxDetails}, Handler: g.doToggleBase64Decode, Description: "Decode base64 on cursor line"},
+		{Keys: []any{'n'}, Contexts: []Context{CtxDetails}, Handler: g.doNextSearchMatch, Description: "Next match", GetDisabledReason: g.searchDisabledReason},
+		{Keys: []any{'N'}, Contexts: []Context{CtxDetails}, Handler: g.doPrevSearchMatch, Description: "Previous match", GetDisabledReason: g.searchDisabledReason},
+		{Keys: []any{'t'}, Contexts: []Context{CtxDetails}, Handler: g.doToggleCompactJSON, Description: "Toggle compact JSON", Short: "compact", GetDisabledReason: g.noDocumentReason},
+		{Keys: []any{'w'}, Contexts: []Context{CtxDetails}, Handler: g.doToggleWrap, Description: "Toggle word wrap", Short: "wrap"},
+		{Keys: []any{'H'}, Contexts: []Context{CtxDetails}, Handler: g.doToggleLineNumbers, Description: "Toggle line numbers", GetDisabledReason: g.noDocumentReason},
+		{Keys: []any{'D'}, Contexts: []Context{CtxDetails}, Handler: g.doFieldSizeBreakdown, Description: "Field size breakdown", GetDisabledReason: g.noDocumentReason},
+		{Keys: []any{'e'}, Contexts: []Context{CtxDetails}, Handler: g.doEditInEditor, Description: "Open in $EDITOR", GetDisabledReason: g.noDocumentReason},
+
+		// Keybindings menu
+		{Keys: []any{'k', gocui.KeyArrowUp}, Contexts: []Context{CtxMenu}, Handler: g.helpMoveUp},
+		{Keys: []any{'j', gocui.KeyArrowDown}, Contexts: []Context{CtxMenu}, Handler: g.helpMoveDown},
+		{Keys: []any{gocui.KeyEnter}, Contexts: []Context{CtxMenu}, Handler: g.helpExecute, Short: "execute"},
+		{Keys: []any{'/'}, Contexts: []Context{CtxMenu}, Handler: g.doStartFilter, Short: "filter"},
+		{Keys: []any{gocui.KeyEsc, 'q', '?'}, Contexts: []Context{CtxMenu}, Handler: g.helpEscape, Short: "close"},
+
+		// Command log
+		{Keys: []any{gocui.KeyEsc, 'q', '@'}, Contexts: []Context{CtxCommandLog}, Handler: g.doToggleModal, Short: "close"},
+
+		// Confirm dialog
+		{Keys: []any{gocui.KeyEnter, 'y'}, Contexts: []Context{CtxConfirm}, Handler: g.doConfirmAccept, Short: "confirm"},
+		{Keys: []any{gocui.KeyEsc, 'n', 'q'}, Contexts: []Context{CtxConfirm}, Handler: g.doConfirmCancel, Short: "cancel"},
+
+		// Query builder
+		{Keys: []any{'k', gocui.KeyArrowUp}, Contexts: []Context{CtxQuery}, Handler: g.queryMoveUp},
+		{Keys: []any{'j', gocui.KeyArrowDown}, Contexts: []Context{CtxQuery}, Handler: g.queryMoveDown},
+		{Keys: []any{'h', gocui.KeyArrowLeft}, Contexts: []Context{CtxQuery}, Handler: g.queryMoveLeft},
+		{Keys: []any{'l', gocui.KeyArrowRight}, Contexts: []Context{CtxQuery}, Handler: g.queryMoveRight},
+		{Keys: []any{gocui.KeyTab}, Contexts: []Context{CtxQuery}, Handler: g.queryNextField},
+		{Keys: []any{gocui.KeyEnter}, Contexts: []Context{CtxQuery}, Handler: g.queryEnter},
+		{Keys: []any{'a'}, Contexts: []Context{CtxQuery}, Handler: g.queryAddFilter},
+		{Keys: []any{'d'}, Contexts: []Context{CtxQuery}, Handler: g.queryDeleteFilter},
+		{Keys: []any{gocui.KeyEsc, 'q'}, Contexts: []Context{CtxQuery}, Handler: g.queryClose},
+
+		// Query select popup
+		{Keys: []any{'k', gocui.KeyArrowUp}, Contexts: []Context{CtxQuerySelect}, Handler: g.querySelectMoveUp},
+		{Keys: []any{'j', gocui.KeyArrowDown}, Contexts: []Context{CtxQuerySelect}, Handler: g.querySelectMoveDown},
+		{Keys: []any{gocui.KeyEnter}, Contexts: []Context{CtxQuerySelect}, Handler: g.querySelectConfirm},
+		{Keys: []any{gocui.KeyEsc, 'q'}, Contexts: []Context{CtxQuerySelect}, Handler: g.querySelectClose},
 	}
 }
 
-// navigationBindings - panel and list navigation
-func (g *Gui) navigationBindings(km *KeybindingManager) []*Binding {
-	return []*Binding{
-		// Arrow up/down - context aware
-		{
-			Key:         gocui.KeyArrowUp,
-			Handler:     g.doCursorUp,
-			Description: "Move up",
-			Contexts: map[Context]func() error{
-				ContextHelp:        g.helpMoveUp,
-				ContextModal:       g.blockAction,
-				ContextSelect:      g.selectMoveUp,
-				ContextQuery:       g.queryMoveUp,
-				ContextQuerySelect: g.querySelectMoveUp,
-			},
-		},
-		{
-			Key:         gocui.KeyArrowDown,
-			Handler:     g.doCursorDown,
-			Description: "Move down",
-			Contexts: map[Context]func() error{
-				ContextHelp:        g.helpMoveDown,
-				ContextModal:       g.blockAction,
-				ContextSelect:      g.selectMoveDown,
-				ContextQuery:       g.queryMoveDown,
-				ContextQuerySelect: g.querySelectMoveDown,
-			},
-		},
-		// Arrow left/right - context aware
-		{
-			Key:         gocui.KeyArrowLeft,
-			Handler:     g.doColumnLeft,
-			Description: "Move left",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterCursorLeft,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryMoveLeft,
-			},
-		},
-		{
-			Key:         gocui.KeyArrowRight,
-			Handler:     g.doColumnRight,
-			Description: "Move right",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterCursorRight,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryMoveRight,
-			},
-		},
-		// Vim keys - context aware
-		{
-			Key:         'j',
-			Handler:     g.doCursorDown,
-			Description: "Move down",
-			Contexts: map[Context]func() error{
-				ContextFilter:      g.filterInsertJ,
-				ContextHelp:        g.helpMoveDown,
-				ContextModal:       g.blockAction,
-				ContextSelect:      g.selectMoveDown,
-				ContextQuery:       g.queryKeyJ,
-				ContextQuerySelect: g.querySelectMoveDown,
-			},
-		},
-		{
-			Key:         'k',
-			Handler:     g.doCursorUp,
-			Description: "Move up",
-			Contexts: map[Context]func() error{
-				ContextFilter:      g.filterInsertK,
-				ContextHelp:        g.helpMoveUp,
-				ContextModal:       g.blockAction,
-				ContextSelect:      g.selectMoveUp,
-				ContextQuery:       g.queryKeyK,
-				ContextQuerySelect: g.querySelectMoveUp,
-			},
-		},
-		{
-			Key:         'h',
-			Handler:     g.doColumnLeft,
-			Description: "Move left",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertH,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryKeyH,
-			},
-		},
-		{
-			Key:         'l',
-			Handler:     g.doColumnRight,
-			Description: "Move right",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertL,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryKeyL,
-			},
-		},
-		// Page Up / Page Down
-		{
-			Key:         gocui.KeyPgup,
-			Handler:     g.doPageUp,
-			Description: "Page up",
-			Contexts: map[Context]func() error{
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.blockAction,
-			},
-		},
-		{
-			Key:         gocui.KeyPgdn,
-			Handler:     g.doPageDown,
-			Description: "Page down",
-			Contexts: map[Context]func() error{
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.blockAction,
-			},
-		},
-		// Home / End
-		{
-			Key:         gocui.KeyHome,
-			Handler:     g.doGoToTop,
-			Description: "Go to top",
-			Contexts: map[Context]func() error{
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.blockAction,
-			},
-		},
-		{
-			Key:         gocui.KeyEnd,
-			Handler:     g.doGoToBottom,
-			Description: "Go to bottom",
-			Contexts: map[Context]func() error{
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.blockAction,
-			},
-		},
-		// Half-page scroll in details
-		{
-			Key:         gocui.KeyCtrlD,
-			Handler:     g.doHalfPageDown,
-			Description: "Half page down",
-			Contexts: map[Context]func() error{
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.blockAction,
-			},
-		},
-		{
-			Key:         gocui.KeyCtrlU,
-			Handler:     g.doHalfPageUp,
-			Description: "Half page up",
-			Contexts: map[Context]func() error{
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.blockAction,
-			},
-		},
-		// Tab
-		{
-			Key:         gocui.KeyTab,
-			Handler:     g.doNextColumn,
-			Description: "Next panel",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.blockAction,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryNextField,
-			},
-		},
-		// [ and ] - cycle tabs backward/forward
-		{
-			Key:         '[',
-			Handler:     g.doSwitchTabPrev,
-			Description: "Previous tab",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertBracketLeft,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('['),
-			},
-		},
-		{
-			Key:         ']',
-			Handler:     g.doSwitchTabNext,
-			Description: "Next tab",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertBracketRight,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar(']'),
-			},
-		},
-		// Space - context aware
-		{
-			Key:         gocui.KeySpace,
-			Handler:     g.doSpace,
-			Description: "Select/Expand",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertSpace,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextSelect: g.doFetchSelectedDocs,
-				ContextQuery:  g.blockAction,
-			},
-		},
-		// Enter - context aware
-		{
-			Key:         gocui.KeyEnter,
-			Handler:     g.doEnter,
-			Description: "Confirm/Details",
-			Contexts: map[Context]func() error{
-				ContextFilter:      g.filterCommit,
-				ContextHelp:        g.helpClose,
-				ContextQuery:       g.queryEnter,
-				ContextQuerySelect: g.querySelectConfirm,
-				ContextConfirm:     g.doConfirmAccept,
-			},
-		},
+// Disabled reasons. They check the focused panel rather than the current
+// context, so the ? menu judges each binding for the panel it was opened from.
+
+func (g *Gui) noItemReason() string {
+	if _, n := g.listState(g.focusedPanel()); n == 0 {
+		return "Nothing selected"
 	}
+	return ""
 }
 
-// filterBindings - filter mode specific
-func (g *Gui) filterBindings(km *KeybindingManager) []*Binding {
-	bindings := []*Binding{
-		{
-			Key:         '/',
-			Handler:     g.doStartFilter,
-			Description: "Start filter",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertSlash,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('/'),
-			},
-		},
-		{
-			Key:     gocui.KeyBackspace,
-			Handler: g.doFilterBackspace,
-			Contexts: map[Context]func() error{
-				ContextQuery: g.queryBackspace,
-			},
-		},
-		{
-			Key:     gocui.KeyBackspace2,
-			Handler: g.doFilterBackspace,
-			Contexts: map[Context]func() error{
-				ContextQuery: g.queryBackspace,
-			},
-		},
+// databaseDisabledReason blocks databases the Firestore document API can't read
+func (g *Gui) databaseDisabledReason() string {
+	if reason := g.noItemReason(); reason != "" {
+		return reason
 	}
-
-	// Character handlers for filter input (includes jq syntax chars)
-	// Exclude chars that have dedicated context-aware bindings: hjkl, csrqveFQgGpCtwx, ?@/, [], 123
-	filterChars := "afouzEIPVWXYZ456789"
-	filterChars += "-_. "
-	filterChars += "|(){}:\"'`,<>=!+*^$#~;&%\\"
-	for _, ch := range filterChars {
-		c := ch // capture for closure
-		bindings = append(bindings, &Binding{
-			Key:     c,
-			Handler: g.makeFilterCharAction(c),
-			Contexts: map[Context]func() error{
-				ContextQuery: g.queryInsertChar(c),
-			},
-		})
+	databases := g.getFilteredDatabases()
+	if g.selectedDatabaseIdx < len(databases) && databases[g.selectedDatabaseIdx].Type == "DATASTORE_MODE" {
+		return "Datastore mode databases can't be browsed"
 	}
-
-	return bindings
+	return ""
 }
 
-// actionBindings - document actions
-func (g *Gui) actionBindings(km *KeybindingManager) []*Binding {
-	return []*Binding{
-		// Go to top (g) / Go to bottom (G)
-		{
-			Key:         'g',
-			Handler:     g.doGoToTop,
-			Description: "Go to top",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('g'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('g'),
-			},
-		},
-		{
-			Key:         'G',
-			Handler:     g.doGoToBottom,
-			Description: "Go to bottom",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('G'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('G'),
-			},
-		},
-		// Number keys to jump panels
-		{
-			Key:         '1',
-			Handler:     g.doJumpToProjects,
-			Description: "Jump to Projects",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('1'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('1'),
-			},
-		},
-		{
-			Key:         '2',
-			Handler:     g.doJumpToCollections,
-			Description: "Jump to Collections",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('2'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('2'),
-			},
-		},
-		{
-			Key:         '3',
-			Handler:     g.doJumpToTree,
-			Description: "Jump to Tree",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('3'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('3'),
-			},
-		},
-		{
-			Key:         'F',
-			Handler:     g.doOpenQuery,
-			Description: "Query builder",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertUpperF,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('F'),
-			},
-		},
-		{
-			Key:         'c',
-			Handler:     g.doCopyJSON,
-			Description: "Copy JSON",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertC,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('c'),
-			},
-		},
-		{
-			Key:         's',
-			Handler:     g.doSaveJSON,
-			Description: "Save JSON",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertS,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('s'),
-			},
-		},
-		{
-			Key:         'r',
-			Handler:     g.doRefresh,
-			Description: "Refresh",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertR,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('r'),
-			},
-		},
-		{
-			Key:         'v',
-			Handler:     g.doToggleSelectMode,
-			Description: "Select mode",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertV,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextSelect: g.doToggleSelectMode, // Toggle off
-				ContextQuery:  g.queryInsertChar('v'),
-			},
-		},
-		{
-			Key:         'S',
-			Handler:     g.doScanCollections,
-			Description: "Scan collections health",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertUpperS,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('S'),
-			},
-		},
-		// Copy document path
-		{
-			Key:         'p',
-			Handler:     g.doCopyPath,
-			Description: "Copy path",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('p'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('p'),
-			},
-		},
-		// Collapse all tree nodes
-		{
-			Key:         'C',
-			Handler:     g.doCollapseAll,
-			Description: "Collapse all",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('C'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('C'),
-			},
-		},
-		// Toggle compact JSON view
-		{
-			Key:         't',
-			Handler:     g.doToggleCompactJSON,
-			Description: "Toggle compact JSON",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('t'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('t'),
-			},
-		},
-		// Toggle word wrap
-		{
-			Key:         'w',
-			Handler:     g.doToggleWrap,
-			Description: "Toggle word wrap",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('w'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('w'),
-			},
-		},
-		// Clear cache (Shift+R)
-		{
-			Key:         'R',
-			Handler:     g.doClearCache,
-			Description: "Clear cache",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('R'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('R'),
-			},
-		},
-		// Show cache statistics
-		{
-			Key:         'i',
-			Handler:     g.doShowCacheStats,
-			Description: "Cache stats",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('i'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('i'),
-			},
-		},
-		// Toggle timestamp humanization
-		{
-			Key:         'T',
-			Handler:     g.doToggleTimestamps,
-			Description: "Toggle timestamps",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('T'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('T'),
-			},
-		},
-		// Export cached documents
-		{
-			Key:         'x',
-			Handler:     g.doExportCachedDocs,
-			Description: "Export cached docs",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('x'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('x'),
-			},
-		},
-		{
-			Key:         'e',
-			Handler:     g.doEditInEditor,
-			Description: "Edit in $EDITOR",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.filterInsertE,
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('e'),
-			},
-		},
-		// Field size breakdown
-		{
-			Key:         'D',
-			Handler:     g.doFieldSizeBreakdown,
-			Description: "Field size breakdown",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('D'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('D'),
-			},
-		},
-		// Field type analysis
-		{
-			Key:         'A',
-			Handler:     g.doFieldTypeAnalysis,
-			Description: "Field type analysis",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('A'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('A'),
-			},
-		},
-		// Next search match
-		{
-			Key:         'n',
-			Handler:     g.doNextSearchMatch,
-			Description: "Next match",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('n'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('n'),
-			},
-		},
-		// Previous search match
-		{
-			Key:         'N',
-			Handler:     g.doPrevSearchMatch,
-			Description: "Previous match",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('N'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('N'),
-			},
-		},
-		// Copy field value
-		{
-			Key:         'y',
-			Handler:     g.doCopyFieldValue,
-			Description: "Copy field value",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('y'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('y'),
-			},
-		},
-		// Focus commands panel
-		{
-			Key:         '0',
-			Handler:     g.doFocusCommands,
-			Description: "Command log",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('0'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('0'),
-			},
-		},
-		// Fast scroll down in details (J)
-		{
-			Key:         'J',
-			Handler:     g.doFastScrollDown,
-			Description: "Scroll down 5 lines",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('J'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('J'),
-			},
-		},
-		// Fast scroll up in details (K)
-		{
-			Key:         'K',
-			Handler:     g.doFastScrollUp,
-			Description: "Scroll up 5 lines",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('K'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('K'),
-			},
-		},
-		// Toggle line numbers
-		{
-			Key:         'H',
-			Handler:     g.doToggleLineNumbers,
-			Description: "Toggle line numbers",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('H'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('H'),
-			},
-		},
-		// Cycle log level filter
-		{
-			Key:         'L',
-			Handler:     g.doCycleLogLevel,
-			Description: "Cycle log level filter",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('L'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('L'),
-			},
-		},
-		// Collection memory estimate
-		{
-			Key:         'M',
-			Handler:     g.doCollectionMemoryEstimate,
-			Description: "Collection memory",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('M'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('M'),
-			},
-		},
-		// Base64 decode
-		{
-			Key:         'B',
-			Handler:     g.doToggleBase64Decode,
-			Description: "Decode base64",
-			Contexts: map[Context]func() error{
-				ContextFilter: g.makeFilterCharAction('B'),
-				ContextHelp:   g.blockAction,
-				ContextModal:  g.blockAction,
-				ContextQuery:  g.queryInsertChar('B'),
-			},
-		},
-		// Remaining keys for filter: b, d, m, o, u
-		{
-			Key:         'b',
-			Handler:     g.makeFilterCharAction('b'),
-			Contexts: map[Context]func() error{
-				ContextQuery: g.queryInsertChar('b'),
-			},
-		},
-		{
-			Key:         'd',
-			Handler:     g.makeFilterCharAction('d'),
-			Contexts: map[Context]func() error{
-				ContextQuery: g.queryInsertChar('d'),
-			},
-		},
-		{
-			Key:         'm',
-			Handler:     g.makeFilterCharAction('m'),
-			Contexts: map[Context]func() error{
-				ContextQuery: g.queryInsertChar('m'),
-			},
-		},
-		{
-			Key:         'o',
-			Handler:     g.makeFilterCharAction('o'),
-			Contexts: map[Context]func() error{
-				ContextQuery: g.queryInsertChar('o'),
-			},
-		},
-		{
-			Key:         'u',
-			Handler:     g.makeFilterCharAction('u'),
-			Contexts: map[Context]func() error{
-				ContextQuery: g.queryInsertChar('u'),
-			},
-		},
-		{
-			Key:         'O',
-			Handler:     g.makeFilterCharAction('O'),
-			Contexts: map[Context]func() error{
-				ContextQuery: g.queryInsertChar('O'),
-			},
-		},
+func (g *Gui) noDocumentReason() string {
+	if g.detailsSource() != "document" {
+		return "No document open"
 	}
+	return ""
 }
 
-// mouseBindings - click handlers
-func (g *Gui) mouseBindings() []*Binding {
-	return []*Binding{
-		{Key: gocui.MouseLeft, ViewName: "helpModal", Handler: g.doHelpClick},
-		{Key: gocui.MouseLeft, ViewName: "projects", Handler: g.doProjectsClick},
-		{Key: gocui.MouseLeft, ViewName: "collections", Handler: g.doCollectionsClick},
-		{Key: gocui.MouseLeft, ViewName: "tree", Handler: g.doTreeClick},
-		{Key: gocui.MouseLeft, ViewName: "details", Handler: g.doDetailsClick},
-		{Key: gocui.MouseLeft, ViewName: "commands", Handler: g.doOutsideClick},
-		{Key: gocui.MouseLeft, ViewName: "help", Handler: g.doOutsideClick},
-		{Key: gocui.MouseLeft, ViewName: "background", Handler: g.doOutsideClick},
+func (g *Gui) noCollectionReason() string {
+	if g.currentCollection == "" {
+		return "No collection open"
 	}
+	return ""
+}
+
+func (g *Gui) noCachedDocsReason() string {
+	if len(g.docCache) == 0 {
+		return "No cached documents"
+	}
+	return ""
+}
+
+func (g *Gui) noQueryResultsReason() string {
+	if !g.queryResultMode {
+		return "No query results to clear"
+	}
+	return ""
+}
+
+func (g *Gui) noCollectionForQueryReason() string {
+	if collection, _ := g.queryTarget(); collection == "" {
+		return "No collection to query"
+	}
+	return ""
+}
+
+func (g *Gui) scanDisabledReason() string {
+	if g.scanRunning {
+		return "Scan already in progress"
+	}
+	return g.noItemReason()
+}
+
+func (g *Gui) filterDisabledReason() string {
+	if g.focusedPanel() == CtxDetails && g.detailsSource() != "document" {
+		return "Filtering works on documents only"
+	}
+	return ""
+}
+
+func (g *Gui) searchDisabledReason() string {
+	filter := g.getDetailsFilter()
+	if filter == "" {
+		return "No active filter, press / first"
+	}
+	if isJqQuery(filter) {
+		return "n/N don't apply to jq queries"
+	}
+	return ""
+}
+
+func (g *Gui) refreshDisabledReason() string {
+	ctx := g.focusedPanel()
+	if ctx != CtxProjects && g.currentProject == "" {
+		return "Select a project first"
+	}
+	switch ctx {
+	case CtxTree:
+		if g.currentCollection == "" && !g.queryResultMode {
+			return "No collection open"
+		}
+	case CtxDetails:
+		switch g.detailsSource() {
+		case "document":
+			if !isDocumentPath(g.currentDocPath) {
+				return "Can't refresh a multi-document view"
+			}
+		case "function":
+			if g.detailsTab != "logs" {
+				return "Switch to the Logs tab to refresh logs"
+			}
+		default:
+			return "Nothing to refresh here"
+		}
+	}
+	return ""
+}
+
+func (g *Gui) copyDisabledReason() string {
+	if g.focusedPanel() == CtxTree {
+		if node, ok := g.selectedTreeNode(); !ok || node.Type != "document" {
+			return "Select a document"
+		}
+		return ""
+	}
+	if g.detailsSource() == "scan" && g.scanResults != nil {
+		return ""
+	}
+	return g.noDocumentReason()
+}
+
+func (g *Gui) copyPathDisabledReason() string {
+	if g.focusedPanel() == CtxTree {
+		if _, ok := g.selectedTreeNode(); !ok {
+			return "Nothing selected"
+		}
+		return ""
+	}
+	if g.detailsSource() != "document" || !isDocumentPath(g.currentDocPath) {
+		return "No document open"
+	}
+	return ""
+}
+
+// isDocumentPath reports whether path is a real document path rather than a
+// label like "3 documents selected"
+func isDocumentPath(path string) bool {
+	for _, r := range path {
+		if r == ' ' {
+			return false
+		}
+	}
+	return path != ""
+}
+
+// Mouse
+
+func (g *Gui) setMouseBindings() error {
+	lists := map[string]string{
+		g.views.projects:    "projects",
+		g.views.databases:   "databases",
+		g.views.collections: "collections",
+		g.views.tree:        "tree",
+		g.views.details:     "details",
+	}
+	for view, column := range lists {
+		column := column
+		bindings := []*gocui.ViewMouseBinding{
+			{ViewName: view, Key: gocui.MouseLeft, Handler: func(opts gocui.ViewMouseBindingOpts) error { return g.onPanelClick(column, opts) }},
+			{ViewName: view, Key: gocui.MouseWheelUp, Handler: func(gocui.ViewMouseBindingOpts) error { return g.onPanelWheel(column, -1) }},
+			{ViewName: view, Key: gocui.MouseWheelDown, Handler: func(gocui.ViewMouseBindingOpts) error { return g.onPanelWheel(column, 1) }},
+		}
+		for _, b := range bindings {
+			if err := g.g.SetViewClickBinding(b); err != nil {
+				return err
+			}
+		}
+	}
+
+	popupBindings := []*gocui.ViewMouseBinding{
+		{ViewName: g.views.helpModal, Key: gocui.MouseLeft, Handler: g.onHelpClick},
+		{ViewName: g.views.helpModal, Key: gocui.MouseWheelUp, Handler: func(gocui.ViewMouseBindingOpts) error { return g.helpMoveUp() }},
+		{ViewName: g.views.helpModal, Key: gocui.MouseWheelDown, Handler: func(gocui.ViewMouseBindingOpts) error { return g.helpMoveDown() }},
+		{ViewName: g.views.querySelect, Key: gocui.MouseLeft, Handler: g.onQuerySelectClick},
+	}
+	for _, view := range []string{g.views.commands, g.views.help, g.views.background} {
+		popupBindings = append(popupBindings, &gocui.ViewMouseBinding{ViewName: view, Key: gocui.MouseLeft, Handler: g.onOutsideClick})
+	}
+	for _, b := range popupBindings {
+		if err := g.g.SetViewClickBinding(b); err != nil {
+			return err
+		}
+	}
+
+	if err := g.g.SetTabClickBinding(g.views.collections, g.onCollectionsTabClick); err != nil {
+		return err
+	}
+	return g.g.SetTabClickBinding(g.views.details, g.onDetailsTabClick)
 }
