@@ -23,6 +23,7 @@ var (
 	// Panel title icons
 	FIREBASE_ICON   = "\U000f0967" // 󰥧 (firebase)
 	PROJECT_ICON    = "\U000f0766" // 󰝦 (package)
+	DATABASE_ICON   = "\U000f01bc" // 󰆼 (database)
 	COLLECTION_ICON = "\U000f024b" // 󰉋 (folder)
 	TREE_ICON       = "\U000f0645" // 󰙅 (file-tree)
 	DETAILS_ICON    = "\U000f0219" // 󰈙 (file-document)
@@ -61,6 +62,7 @@ var (
 func disableAllIcons() {
 	FIREBASE_ICON = ""
 	PROJECT_ICON = ""
+	DATABASE_ICON = ""
 	COLLECTION_ICON = ""
 	TREE_ICON = ""
 	DETAILS_ICON = ""
@@ -90,6 +92,7 @@ func disableAllIcons() {
 // PatchForNerdFontsV2 updates icons for Nerd Fonts v2 compatibility
 func PatchForNerdFontsV2() {
 	FIREBASE_ICON = "\uf6b1"
+	DATABASE_ICON = "\uf1c0"
 	FOLDER_CLOSED = "\uf07b"
 	FOLDER_OPEN = "\uf07c"
 	DOCUMENT = "\uf0f6"

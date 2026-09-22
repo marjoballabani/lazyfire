@@ -2,20 +2,23 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: 'LazyFire',
-  description: 'A terminal UI for browsing Firebase Firestore, monitoring Cloud Functions, and streaming logs - built for developers who live in the terminal.',
+  description: 'A keyboard-driven terminal app for Firebase: browse projects, databases and Firestore documents, run queries, and read Cloud Functions logs.',
   base: '/lazyfire/',
 
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/lazyfire/logo.svg' }],
-    ['meta', { name: 'theme-color', content: '#ff6f00' }],
+    ['meta', { name: 'theme-color', content: '#15132b' }],
+    ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
+    ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
+    ['link', { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Recursive:slnt,wght,CASL,CRSV,MONO@-15..0,300..1000,0..1,0..1,0..1&display=swap' }],
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:title', content: 'LazyFire - Firebase in your terminal' }],
-    ['meta', { property: 'og:description', content: 'Browse Firestore, monitor Cloud Functions, and view live logs from your terminal. Vim keybindings, query builder, collection health scans, and more.' }],
+    ['meta', { property: 'og:description', content: 'Browse projects, databases and Firestore documents, run queries, and read Cloud Functions logs from your terminal.' }],
     ['meta', { property: 'og:image', content: 'https://marjoballabani.github.io/lazyfire/preview.gif' }],
     ['meta', { property: 'og:url', content: 'https://marjoballabani.github.io/lazyfire/' }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:title', content: 'LazyFire - Firebase in your terminal' }],
-    ['meta', { name: 'twitter:description', content: 'Browse Firestore, monitor Cloud Functions, and view live logs from your terminal.' }],
+    ['meta', { name: 'twitter:description', content: 'Browse projects, databases and Firestore documents, run queries, and read Cloud Functions logs from your terminal.' }],
     ['meta', { name: 'twitter:image', content: 'https://marjoballabani.github.io/lazyfire/preview.gif' }],
     ['meta', { name: 'keywords', content: 'firebase, firestore, tui, terminal, cli, cloud functions, go, lazygit, vim' }],
   ],
@@ -50,8 +53,10 @@ export default defineConfig({
           text: 'Features',
           items: [
             { text: 'Navigation', link: '/guide/navigation' },
+            { text: 'Databases', link: '/guide/databases' },
             { text: 'Collections & Documents', link: '/guide/collections' },
             { text: 'Cloud Functions', link: '/guide/cloud-functions' },
+            { text: 'Storage, Auth, Rules & Indexes', link: '/guide/storage-auth-rules' },
             { text: 'Query Builder', link: '/guide/query-builder' },
             { text: 'Visual Select Mode', link: '/guide/select-mode' },
             { text: 'Document Stats', link: '/guide/document-stats' },

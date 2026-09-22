@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -124,13 +125,14 @@ func (c *Client) refreshAccessToken(refreshToken string) (string, error) {
 	return result.AccessToken, nil
 }
 
-// firestoreBaseURL returns the base Firestore REST API URL for the current project.
-// In emulator mode, this points to the local emulator; otherwise to the production API.
+// firestoreBaseURL returns the base Firestore REST API URL for the current
+// project and database. In emulator mode, this points to the local emulator;
+// otherwise to the production API.
 func (c *Client) firestoreBaseURL() string {
 	if c.emulatorMode {
-		return fmt.Sprintf("http://%s/v1/projects/%s/databases/(default)/documents", c.firestoreHost, c.currentProject)
+		return fmt.Sprintf("http://%s/v1/projects/%s/databases/%s/documents", c.firestoreHost, c.currentProject, c.GetCurrentDatabase())
 	}
-	return fmt.Sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents", c.currentProject)
+	return fmt.Sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/%s/documents", c.currentProject, c.GetCurrentDatabase())
 }
 
 // setAuthHeader adds the Authorization header if not in emulator mode.
@@ -678,6 +680,71 @@ func parseArrayValue(s string) map[string]interface{} {
 	}
 }
 
+// ListDatabases returns the Firestore databases of the current project, the
+// default one first. The emulator only serves the default database.
+func (c *Client) ListDatabases() ([]Database, error) {
+	if c.currentProject == "" {
+		return nil, fmt.Errorf("no project selected")
+	}
+	if c.emulatorMode {
+		return []Database{{ID: DefaultDatabase}}, nil
+	}
+
+	url := fmt.Sprintf("https://firestore.googleapis.com/v1/projects/%s/databases", c.currentProject)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.setAuthHeader(req); err != nil {
+		return nil, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+	}
+	return parseDatabases(body)
+}
+
+// parseDatabases reads a databases.list response, default database first
+func parseDatabases(body []byte) ([]Database, error) {
+	var result struct {
+		Databases []struct {
+			Name       string `json:"name"` // projects/{project}/databases/{id}
+			LocationID string `json:"locationId"`
+			Type       string `json:"type"`
+		} `json:"databases"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	databases := make([]Database, 0, len(result.Databases))
+	for _, db := range result.Databases {
+		databases = append(databases, Database{
+			ID:         db.Name[strings.LastIndex(db.Name, "/")+1:],
+			LocationID: db.LocationID,
+			Type:       db.Type,
+		})
+	}
+	sort.SliceStable(databases, func(i, j int) bool {
+		if (databases[i].ID == DefaultDatabase) != (databases[j].ID == DefaultDatabase) {
+			return databases[i].ID == DefaultDatabase
+		}
+		return databases[i].ID < databases[j].ID
+	})
+	return databases, nil
+}
+
 // HasCompositeIndexes checks if a collection has any composite indexes
 // by calling the Firestore Admin API. Returns false in emulator mode.
 func (c *Client) HasCompositeIndexes(collectionID string) (bool, error) {
@@ -688,7 +755,7 @@ func (c *Client) HasCompositeIndexes(collectionID string) (bool, error) {
 		return false, fmt.Errorf("no project selected")
 	}
 
-	url := fmt.Sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/(default)/collectionGroups/%s/indexes", c.currentProject, collectionID)
+	url := fmt.Sprintf("https://firestore.googleapis.com/v1/projects/%s/databases/%s/collectionGroups/%s/indexes", c.currentProject, c.GetCurrentDatabase(), collectionID)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {

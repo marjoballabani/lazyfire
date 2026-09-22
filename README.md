@@ -8,18 +8,20 @@ A terminal UI for browsing Firebase Firestore, inspired by [lazygit](https://git
 
 ## Features
 
-- Browse Firestore collections and documents
+- Browse Firestore collections and documents, across all of a project's databases
 - Expandable tree view for nested subcollections
 - View document data as syntax-highlighted JSON
-- **Cloud Functions Browser** - View functions, details, and live logs with `[` / `]` tabs
+- **Cloud Functions Browser** - View functions, details, and logs with `[` / `]` tabs
+- **Storage, Auth, Rules and Indexes tabs** - Browse buckets and files, Auth users, security rules and composite indexes (read-only)
 - **Query Builder** - Interactive Firestore query builder with WHERE, ORDER BY, LIMIT
 - **jq query support** for filtering JSON in details panel
 - **Visual select mode** for multi-document selection and parallel fetching
 - **Smart caching** - Documents and collections cached with visual indicator
 - **Document stats** with Firestore limits validation (size, fields, depth)
 - Filter/search across all panels
-- Vim-style keybindings (h/j/k/l)
-- Mouse support (click to select, navigate)
+- Vim-style keybindings (h/j/k/l), with keys that follow the focused panel
+- **Keybindings menu** - `?` lists the keys for the focused panel; filter it with `/` and run a key with `Enter`
+- Mouse support (click, double click to open, wheel scrolling, click tabs)
 - Customizable theme (hex colors, 256-color, bold)
 - Nerd Font icons (optional, with graceful fallback)
 - Uses existing Firebase CLI authentication
@@ -73,38 +75,47 @@ Download pre-built binaries from the [releases page](https://github.com/marjobal
 
 **Panels:**
 - **Projects** - Your Firebase projects
-- **Collections** - Root collections or Cloud Functions (switch with `[` / `]`)
+- **Databases** - The project's Firestore databases, for projects with more than the default one
+- **Collections** - Tabs for Collections, Functions, Storage, Auth, Rules and Indexes (switch with `[` / `]`)
 - **Tree** - Documents and subcollections (expandable)
 - **Details** - Document JSON / Function details / Logs (switch with `[` / `]` in Functions view)
 - **Commands** - API call status
 
 ## Keybindings
 
+Keys follow the focused panel and tab. Press `?` to see the ones that apply right now; the bar at the bottom shows the most useful ones. See the [full reference](docs/reference/keybindings.md).
+
 | Key | Action |
 |-----|--------|
-| `h` `←` | Move to left panel |
-| `l` `→` | Move to right panel |
+| `h` `←` `Shift+Tab` | Previous left panel |
+| `l` `→` `Tab` | Next left panel |
 | `j` `↓` | Move down in list |
 | `k` `↑` | Move up in list |
-| `Tab` | Go to details panel |
-| `[` `]` | Switch tabs (Collections/Functions, Details/Logs) |
-| `Enter` | Open document in details / Fetch project info |
+| `1` `2` `3` `4` | Focus Projects / Databases / Collections / Tree |
+| `0` | Focus details (`Esc` goes back) |
+| `[` `]` | Switch tabs (Collections/Functions/Storage/Auth/Rules/Indexes, Details/Logs) |
+| `Enter` | Open document in details / open collection or database / fetch project info |
 | `Space` | Select / Expand / Collapse (fetch selected in select mode) |
 | `v` | Toggle select mode (tree panel) |
 | `F` | Open query builder (collections/tree panel) |
+| `Q` | Clear query results (tree panel) |
 | `/` | Filter current panel |
 | `c` | Copy JSON to clipboard (respects jq filter) |
 | `s` | Save JSON to ~/Downloads (respects jq filter) |
+| `y` | Copy the value on the cursor line (details panel) |
 | `e` | Open in external editor (details panel) |
 | `Esc` | Back: close popup / cancel filter / clear filter / exit select mode |
 | `r` | Refresh (also refreshes logs in Functions view) |
-| `?` | Show keyboard shortcuts |
+| `?` | Keybindings for the focused panel (`/` to filter, `Enter` to run) |
 | `@` | Show command history |
 | `q` | Quit |
 
 ### Mouse
 
 - **Click** on any panel to focus and select item
+- **Double click** to open an item
+- **Wheel** to move through lists or scroll details
+- **Click** a tab title to switch tabs
 - **Click** outside popup to close it
 
 ## Filtering & jq Queries

@@ -12,6 +12,10 @@ Feature expansion plan for LazyFire.
 - **Emulator Support** - Connect to local Firebase Emulator
 - **Customizable Themes** - YAML-based color configuration
 - **Visual Select Mode** - Multi-select documents for batch operations
+- **Multiple Databases** - Databases panel to switch between a project's Firestore databases
+- **Storage, Auth, Rules and Indexes** - Read-only tabs for Cloud Storage buckets and files, Auth users, security rules and composite indexes
+- **Keybindings Menu** - `?` lists the keys for the focused panel, filterable and runnable
+- **Mouse Support** - Click, double click, wheel scrolling and tab switching
 
 ---
 
@@ -26,12 +30,10 @@ Browse Firebase Realtime Database with the same interface as Firestore.
 - JSON view at any path
 - Same filtering/copy/save as Firestore
 
-### Storage Browser
+### Storage Downloads
 
-Browse Cloud Storage buckets.
+The Storage tab already lists buckets, folders and file metadata. Next:
 
-- List buckets and folders
-- View file metadata (size, type, created)
 - Download files
 - Preview text/JSON files
 
@@ -43,13 +45,3 @@ View hosting deployments.
 - Show deployment history
 - View current deployment details
 
-### Service Mode Switching
-
-Quick switching between Firebase services:
-
-- `1` / `D` - Firestore (current default)
-- `2` / `R` - Realtime Database
-- `3` / `S` - Storage
-- `4` / `H` - Hosting
-
-Status bar shows current mode: `[Firestore] project-name`

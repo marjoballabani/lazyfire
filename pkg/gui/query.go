@@ -24,40 +24,28 @@ var queryOperators = []string{"==", "!=", "<", "<=", ">", ">=", "in", "not-in", 
 // For "in", "not-in", "array-contains-any" use array types
 var queryValueTypes = []string{"auto", "string", "integer", "double", "boolean", "null", "array"}
 
+// queryTarget returns the collection the query builder works on and the
+// index of its tree node, or -1 for a top-level query that replaces the tree.
+// It follows the focused panel: a collection node in the tree, the
+// highlighted collection in the collections panel, else the open collection.
+func (g *Gui) queryTarget() (string, int) {
+	switch g.currentColumn {
+	case "tree":
+		if node, ok := g.selectedTreeNode(); ok && node.Type == "collection" {
+			return node.Path, g.getOriginalTreeNodeIndex(g.selectedTreeIdx)
+		}
+	case "collections":
+		filtered := g.getFilteredCollections()
+		if g.selectedCollectionIdx < len(filtered) {
+			return filtered[g.selectedCollectionIdx].Name, -1
+		}
+	}
+	return g.currentCollection, -1
+}
+
 // openQueryModal opens the query builder modal.
 func (g *Gui) openQueryModal() error {
-	// Determine collection path based on current panel
-	collectionPath := ""
-	nodeIdx := -1 // -1 means top-level query (replace whole tree)
-
-	if g.currentColumn == "tree" {
-		// Check if selected node is a collection
-		filtered := g.getFilteredTreeNodes()
-		if g.selectedTreeIdx < len(filtered) {
-			node := filtered[g.selectedTreeIdx]
-			if node.Type == "collection" {
-				collectionPath = node.Path
-				// Find the original index in unfiltered tree
-				nodeIdx = g.getOriginalTreeNodeIndex(g.selectedTreeIdx)
-			}
-		}
-	}
-
-	// Fall back to current collection from collections panel
-	if collectionPath == "" {
-		collectionPath = g.currentCollection
-		nodeIdx = -1
-	}
-
-	// Fall back to focused collection in the list
-	if collectionPath == "" {
-		filtered := g.getFilteredCollections()
-		if g.selectedCollectionIdx < len(filtered) && len(filtered) > 0 {
-			collectionPath = filtered[g.selectedCollectionIdx].Name
-			nodeIdx = -1
-		}
-	}
-
+	collectionPath, nodeIdx := g.queryTarget()
 	if collectionPath == "" {
 		g.logCommand("F", "No collection available", "error")
 		return nil
@@ -80,7 +68,7 @@ func (g *Gui) openQueryModal() error {
 	}
 
 	g.logCommand("F", fmt.Sprintf("Query: %s", collectionPath), "success")
-	return nil
+	return g.relayout()
 }
 
 // queryInputEditor handles text input in the query input view.
@@ -89,10 +77,12 @@ func (g *Gui) queryInputEditor(v *gocui.View, key gocui.Key, ch rune, mod gocui.
 	case gocui.KeyEnter:
 		// Commit the edit
 		g.commitQueryEditFromView(v)
+		_ = g.relayout()
 		return true
 	case gocui.KeyEsc:
 		// Cancel edit
 		g.queryEditMode = false
+		_ = g.relayout()
 		return true
 	default:
 		// Let default editor handle other keys
@@ -172,29 +162,41 @@ func (g *Gui) clearQuery() error {
 	return g.Layout(g.g)
 }
 
-// executeQuery runs the query and displays results in the tree.
+// executeQuery runs the query built in the modal and shows the results.
 func (g *Gui) executeQuery() error {
 	if g.queryCollection == "" {
 		return nil
 	}
 
 	g.queryModalOpen = false
+	opts := firebase.QueryOptions{
+		Filters:  append([]firebase.QueryFilter(nil), g.queryFilters...),
+		OrderBy:  g.queryOrderBy,
+		OrderDir: g.queryOrderDir,
+		Limit:    g.queryLimit,
+	}
+	g.runQuery(g.queryCollection, g.queryNodeIdx, opts)
+	return g.relayout()
+}
+
+// runQuery runs a query and shows the results in the tree: replacing the
+// tree for a top-level query (nodeIdx -1), else under the collection node.
+func (g *Gui) runQuery(collectionPath string, nodeIdx int, opts firebase.QueryOptions) {
+	gen := g.databaseGen
 	g.treeLoading = true
-	g.logCommand("query", fmt.Sprintf("Query on %s...", g.queryCollection), "running")
+	g.logCommand("query", fmt.Sprintf("Query on %s...", collectionPath), "running")
+	if nodeIdx == -1 {
+		g.lastQueryCollection = collectionPath
+		g.lastQueryOptions = opts
+	}
 
-	collectionPath := g.queryCollection
-	nodeIdx := g.queryNodeIdx
 	go func() {
-		opts := firebase.QueryOptions{
-			Filters:  g.queryFilters,
-			OrderBy:  g.queryOrderBy,
-			OrderDir: g.queryOrderDir,
-			Limit:    g.queryLimit,
-		}
-
 		docs, err := g.firebaseClient.RunQuery(collectionPath, opts)
 
 		g.g.Update(func(gui *gocui.Gui) error {
+			if gen != g.databaseGen {
+				return nil // loaded for another project or database
+			}
 			g.treeLoading = false
 
 			if err != nil {
@@ -210,6 +212,7 @@ func (g *Gui) executeQuery() error {
 			if nodeIdx == -1 {
 				// Top-level query: replace entire tree
 				g.queryResultMode = true
+				g.currentCollection = collectionPath
 				g.treeNodes = nil
 				for _, doc := range docs {
 					g.treeNodes = append(g.treeNodes, TreeNode{
@@ -223,8 +226,10 @@ func (g *Gui) executeQuery() error {
 				}
 				g.selectedTreeIdx = 0
 			} else {
-				// Subcollection query: insert results under the collection node
-				if nodeIdx < len(g.treeNodes) {
+				// Subcollection query: insert results under the collection
+				// node, found again since the tree may have changed meanwhile
+				nodeIdx := g.treeNodeIndex(collectionPath)
+				if nodeIdx >= 0 {
 					parentNode := g.treeNodes[nodeIdx]
 					parentDepth := parentNode.Depth
 
@@ -262,8 +267,6 @@ func (g *Gui) executeQuery() error {
 			return nil
 		})
 	}()
-
-	return nil
 }
 
 // addQueryFilter adds a new empty filter to the query.
@@ -321,7 +324,8 @@ func (g *Gui) handleQueryEnter() error {
 		}
 	}
 
-	return nil
+	// Editing focuses the input or select popup
+	return g.relayout()
 }
 
 // startQueryEdit starts editing the currently selected field.

@@ -27,23 +27,33 @@ LazyFire is a terminal-based Firebase browser that lets you navigate your Firest
 
 3. **Navigate**
    - Use `j`/`k` to move up/down
-   - Use `h`/`l` or `Tab` to switch panels
-   - Press `Space` to select items
-   - Press `?` for help
+   - Use `Tab` or `h`/`l` to switch panels, `0` to jump to Details
+   - Press `Space` to select, `Enter` to open
+   - Press `?` to see the keys for the panel you are in
 
 ## Interface Overview
 
-LazyFire uses a four-panel layout:
+The left side has four stacked panels, and the right side shows details:
 
 ```
-┌─ Projects ──┬─ Collections ──┬─ Tree ──────┬─ Details ────┐
-│             │                │             │              │
-│ Your        │ Collections    │ Documents   │ Document     │
-│ Firebase    │ or Functions   │ in the      │ data in      │
-│ projects    │ in project     │ collection  │ JSON format  │
-│             │                │             │              │
-└─────────────┴────────────────┴─────────────┴──────────────┘
+╭─ Projects ────────╮╭─ Details ─────────────────────────╮
+│ Your Firebase     ││ Document JSON, function details   │
+│ projects          ││ and logs, storage and user info   │
+╰───────────────────╯│                                   │
+╭─ Databases ───────╮│                                   │
+│ Firestore DBs     ││                                   │
+╰───────────────────╯│                                   │
+╭─ Collections ─────╮│                                   │
+│ Collections and   │╰───────────────────────────────────╯
+│ other tabs        │╭─ Commands ────────────────────────╮
+╰───────────────────╯│ Status of the last API call       │
+╭─ Tree ────────────╮╰───────────────────────────────────╯
+│ Documents         │
+╰───────────────────╯
+ The bar at the bottom shows the keys for the focused panel
 ```
+
+The collections panel has tabs for Collections, Functions, Storage, Auth, Rules and Indexes. See [Navigation](/guide/navigation) for how to move around.
 
 ## Next Steps
 
