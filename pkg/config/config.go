@@ -1,8 +1,9 @@
 // Package config handles loading and parsing of LazyFire configuration.
-// Configuration is loaded from ~/.lazyfire/config.yaml or ./config.yaml
+// See LoadConfig for where the configuration file is looked up.
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -46,8 +47,14 @@ type ThemeConfig struct {
 	SelectedLineBgColor []string `mapstructure:"selectedLineBgColor"`
 }
 
-// LoadConfig loads configuration from file or returns defaults.
-// It searches for config.yaml in ~/.lazyfire/ and the current directory.
+// LoadConfig returns the built-in defaults, overridden by the first config
+// file found, like lazygit:
+//  1. the file named by the LAZYFIRE_CONFIG_FILE environment variable
+//  2. $XDG_CONFIG_HOME/lazyfire/config.yml (~/.config/lazyfire/ by default)
+//  3. ~/.lazyfire/config.yaml
+//  4. ./config.yaml
+//
+// Settings missing from the file keep their defaults. Both .yml and .yaml work.
 func LoadConfig() (*Config, error) {
 	// Default configuration
 	config := &Config{
@@ -63,29 +70,46 @@ func LoadConfig() (*Config, error) {
 		},
 	}
 
-	// Create config directory if it doesn't exist
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return config, nil
+	v := viper.New()
+	v.SetConfigType("yaml")
+
+	// A file named explicitly must exist and parse
+	if path := os.Getenv("LAZYFIRE_CONFIG_FILE"); path != "" {
+		v.SetConfigFile(path)
+		if err := v.ReadInConfig(); err != nil {
+			return config, fmt.Errorf("LAZYFIRE_CONFIG_FILE: %w", err)
+		}
+		return config, v.Unmarshal(config)
 	}
 
-	configDir := filepath.Join(home, ".lazyfire")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return config, nil
+	v.SetConfigName("config")
+	for _, dir := range configDirs() {
+		v.AddConfigPath(dir)
 	}
-
-	// Configure viper to search for config files
-	viper.SetConfigName("config")
-	viper.SetConfigType("yaml")
-	viper.AddConfigPath(configDir)
-	viper.AddConfigPath(".")
 
 	// Read and parse config file if it exists
-	if err := viper.ReadInConfig(); err == nil {
-		if err := viper.Unmarshal(config); err != nil {
+	if err := v.ReadInConfig(); err == nil {
+		if err := v.Unmarshal(config); err != nil {
 			return config, err
 		}
 	}
 
 	return config, nil
+}
+
+// configDirs lists the directories searched for config.yml, in order
+func configDirs() []string {
+	var dirs []string
+	home, homeErr := os.UserHomeDir()
+	configHome := os.Getenv("XDG_CONFIG_HOME")
+	if configHome == "" && homeErr == nil {
+		configHome = filepath.Join(home, ".config")
+	}
+	if configHome != "" {
+		dirs = append(dirs, filepath.Join(configHome, "lazyfire"))
+	}
+	if homeErr == nil {
+		dirs = append(dirs, filepath.Join(home, ".lazyfire"))
+	}
+	return append(dirs, ".")
 }

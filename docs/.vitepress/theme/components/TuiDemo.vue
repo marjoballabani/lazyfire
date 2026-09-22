@@ -532,22 +532,22 @@ function footer(panel: Panel): string {
 
 <style scoped>
 .tui-frame {
-  --term: #1b1836;
-  --term-line: #3a3566;
-  --term-text: #cfc9ea;
-  --term-dim: #8a84b3;
-  --term-sel: #35306a;
+  --term: #1c1d20;
+  --term-line: #3a3d43;
+  --term-text: #d0d2d6;
+  --term-dim: #8b8e94;
+  --term-sel: #34373e;
   --ember: #ff8a3d;
   --flame: #ffd166;
   --coal: #ff6b57;
-  --sky: #9db4ff;
+  --sky: #8ab4f8;
   --ok: #7ed9a0;
 
   border: 1px solid var(--term-line);
   border-radius: 12px;
   background: var(--term);
   color: var(--term-text);
-  box-shadow: 0 30px 80px -30px rgba(10, 8, 30, 0.7), 0 0 0 1px rgba(255, 138, 61, 0.06);
+  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 138, 61, 0.06);
   overflow: hidden;
 }
 
@@ -564,8 +564,8 @@ function footer(panel: Panel): string {
 }
 
 .tui-pressed kbd {
-  background: #2a2652;
-  border-color: #4a4480;
+  background: #2a2c31;
+  border-color: #4a4d55;
   color: var(--flame);
   animation: press 380ms ease-out;
 }
@@ -778,7 +778,7 @@ function footer(panel: Panel): string {
   border: 1px solid var(--ember);
   border-radius: 7px;
   background: var(--term);
-  box-shadow: 0 18px 50px rgba(5, 4, 18, 0.6);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
 }
 
 .menu-section {

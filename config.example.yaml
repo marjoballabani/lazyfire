@@ -1,36 +1,46 @@
 # LazyFire Configuration
-# Copy to ~/.lazyfire/config.yaml
+#
+# LazyFire works without a config file. Everything below shows the built-in
+# defaults, so copy this file only to change something, and keep just the
+# settings you change: anything you leave out keeps its default.
+#
+# Where LazyFire looks, first match wins:
+#   1. the file in the LAZYFIRE_CONFIG_FILE environment variable
+#   2. ~/.config/lazyfire/config.yml ($XDG_CONFIG_HOME/lazyfire/ if set)
+#   3. ~/.lazyfire/config.yaml
+#   4. ./config.yaml in the directory you start LazyFire from
 
 ui:
-  # Nerd Fonts version for icons: "3" (default), "2" (older), or "" (disable icons)
+  # Nerd Fonts version for icons: "3", "2" (older fonts), or "" to disable
+  # icons in terminals without a Nerd Font
   nerdFontsVersion: "3"
 
   theme:
-    # Supports: named colors (cyan, blue, red, green, yellow, magenta, white, black, default)
-    #           hex colors (#ed8796)
-    #           256-color numbers (0-255)
-    #           attributes: bold, underline, reverse
+    # Colors: named colors (cyan, blue, red, green, yellow, magenta, white, black, default),
+    #         hex colors (#ed8796) or 256-color numbers (0-255)
+    # Attributes: bold, underline, reverse
     activeBorderColor:
-      - cyan
+      - "#ed8796"
+      - bold
     inactiveBorderColor:
-      - default
+      - "#5f626b"
     optionsTextColor:
-      - cyan
+      - "#8aadf4"
     selectedLineBgColor:
-      - blue
+      - "#494d64"
+      - bold
 
-# Theme: Catppuccin Macchiato
+# Theme: terminal colors
 # ui:
 #   theme:
 #     activeBorderColor:
-#       - "#ed8796"
-#       - bold
+#       - cyan
 #     inactiveBorderColor:
-#       - "#5f626b"
+#       - default
 #     optionsTextColor:
-#       - "#8aadf4"
+#       - cyan
 #     selectedLineBgColor:
-#       - "#494d64"
+#       - blue
 
 # Theme: Dracula
 # ui:
@@ -44,10 +54,6 @@ ui:
 #       - "#8be9fd"
 #     selectedLineBgColor:
 #       - "#44475a"
-
-# Disable icons (for terminals without Nerd Fonts)
-# ui:
-#   nerdFontsVersion: ""
 
 # Connect to local Firebase emulators
 # Start emulators first: firebase emulators:start

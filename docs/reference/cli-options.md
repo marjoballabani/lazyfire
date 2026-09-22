@@ -20,9 +20,16 @@ lazyfire --version
 
 ## Configuration
 
-LazyFire loads configuration from `~/.lazyfire/config.yaml`.
+LazyFire loads configuration from `~/.config/lazyfire/config.yml`, falling back to `~/.lazyfire/config.yaml` and `./config.yaml`. It works without a config file.
 
 See [Configuration](/guide/configuration) for details.
+
+## Environment Variables
+
+| Variable | Effect |
+|----------|--------|
+| `LAZYFIRE_CONFIG_FILE` | Use this config file instead of searching the usual locations |
+| `XDG_CONFIG_HOME` | Look for `lazyfire/config.yml` here instead of `~/.config` |
 
 ## Authentication
 

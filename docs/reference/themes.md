@@ -4,7 +4,7 @@ LazyFire supports custom color themes via configuration.
 
 ## Configuring Colors
 
-Edit `~/.lazyfire/config.yaml`:
+Edit your config file (`~/.config/lazyfire/config.yml`, see [Configuration](/guide/configuration)):
 
 ```yaml
 ui:
