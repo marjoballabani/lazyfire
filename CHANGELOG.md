@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Config file at `~/.config/lazyfire/config.yml` (or `$XDG_CONFIG_HOME/lazyfire/`), like lazygit; `~/.lazyfire/config.yaml` and `./config.yaml` still work
+- `LAZYFIRE_CONFIG_FILE` environment variable to use a specific config file
+
+### Changed
+- `config.example.yaml` now shows the real defaults, with other themes as commented options
+- LazyFire no longer creates an empty `~/.lazyfire` directory on start
+- Documentation site uses dark neutral greys instead of purple tones
+
 ## [0.2.0] - 2026-09-22
 
 ### Added

@@ -5,7 +5,7 @@
 //
 //	lazyfire
 //
-// Configuration is loaded from ~/.lazyfire/config.yaml
+// Configuration is loaded from ~/.config/lazyfire/config.yml (see pkg/config)
 package main
 
 import (

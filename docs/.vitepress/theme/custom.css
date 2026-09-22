@@ -1,22 +1,21 @@
 /*
- * LazyFire theme: a sleeping flame at night.
- * Night and dusk come from the sky behind the logo, ember, flame and coal
- * from the fire itself. Light mode swaps the sky for dawn.
+ * LazyFire theme: neutral charcoal greys with the flame colors of the logo
+ * (ember, flame, coal) as accents. Light mode uses the same greys, inverted.
  */
 
 :root {
-  --lf-night: #15132b;
-  --lf-dusk: #221f42;
-  --lf-dusk-line: #3a3566;
-  --lf-ash: #cfc9ea;
-  --lf-ash-dim: #9791bd;
+  --lf-bg-dark: #161719;
+  --lf-surface-dark: #1f2124;
+  --lf-line-dark: #36393f;
+  --lf-text-dark: #c9ccd1;
+  --lf-text-dark-dim: #8e9298;
   --lf-ember: #ff8a3d;
   --lf-flame: #ffd166;
   --lf-coal: #e5533d;
-  --lf-dawn: #f6f4fb;
-  --lf-dawn-deep: #ebe7f6;
-  --lf-ink: #1c1937;
-  --lf-ink-soft: #4a4570;
+  --lf-bg-light: #f6f6f5;
+  --lf-bg-light-alt: #ececea;
+  --lf-text-light: #1c1c1e;
+  --lf-text-light-soft: #4b4c50;
   --lf-ember-deep: #c2410c;
 
   /* Recursive: casual display, linear body, mono for code, one family */
@@ -28,28 +27,28 @@
   --vp-c-brand-3: #ea6a2c;
   --vp-c-brand-soft: rgba(194, 65, 12, 0.12);
 
-  --vp-c-bg: var(--lf-dawn);
-  --vp-c-bg-alt: var(--lf-dawn-deep);
-  --vp-c-bg-elv: #fbfaff;
-  --vp-c-bg-soft: #efecf8;
-  --vp-c-text-1: var(--lf-ink);
-  --vp-c-text-2: var(--lf-ink-soft);
-  --vp-c-text-3: #7a759c;
-  --vp-c-divider: #dcd7ec;
-  --vp-c-gutter: #dcd7ec;
-  --vp-c-border: #cfc9e4;
+  --vp-c-bg: var(--lf-bg-light);
+  --vp-c-bg-alt: var(--lf-bg-light-alt);
+  --vp-c-bg-elv: #fbfbfa;
+  --vp-c-bg-soft: #efefed;
+  --vp-c-text-1: var(--lf-text-light);
+  --vp-c-text-2: var(--lf-text-light-soft);
+  --vp-c-text-3: #6e7075;
+  --vp-c-divider: #deded9;
+  --vp-c-gutter: #deded9;
+  --vp-c-border: #d2d2cd;
 
-  --vp-code-bg: #ece8f7;
+  --vp-code-bg: #ebebe8;
   --vp-code-color: #7a2e0e;
-  --vp-code-block-bg: var(--lf-dusk);
-  --vp-code-copy-code-bg: var(--lf-dusk);
+  --vp-code-block-bg: var(--lf-surface-dark);
+  --vp-code-copy-code-bg: var(--lf-surface-dark);
 
   --vp-button-brand-bg: var(--lf-ember-deep);
   --vp-button-brand-hover-bg: #a8380a;
   --vp-button-brand-active-bg: #8f2f08;
   --vp-button-brand-text: #fff;
 
-  --vp-home-hero-name-color: var(--lf-ink);
+  --vp-home-hero-name-color: var(--lf-text-light);
 }
 
 .dark {
@@ -58,28 +57,28 @@
   --vp-c-brand-3: #ffb07a;
   --vp-c-brand-soft: rgba(255, 138, 61, 0.14);
 
-  --vp-c-bg: var(--lf-night);
-  --vp-c-bg-alt: #1a1734;
-  --vp-c-bg-elv: #1d1a39;
-  --vp-c-bg-soft: var(--lf-dusk);
-  --vp-c-text-1: #ece8fa;
-  --vp-c-text-2: var(--lf-ash);
-  --vp-c-text-3: var(--lf-ash-dim);
-  --vp-c-divider: #2c2854;
-  --vp-c-gutter: #100e22;
-  --vp-c-border: var(--lf-dusk-line);
+  --vp-c-bg: var(--lf-bg-dark);
+  --vp-c-bg-alt: #1b1c1f;
+  --vp-c-bg-elv: #1d1f22;
+  --vp-c-bg-soft: var(--lf-surface-dark);
+  --vp-c-text-1: #ededee;
+  --vp-c-text-2: var(--lf-text-dark);
+  --vp-c-text-3: var(--lf-text-dark-dim);
+  --vp-c-divider: #2a2c30;
+  --vp-c-gutter: #0f1011;
+  --vp-c-border: var(--lf-line-dark);
 
-  --vp-code-bg: #262248;
+  --vp-code-bg: #26282c;
   --vp-code-color: var(--lf-flame);
-  --vp-code-block-bg: #1b1836;
-  --vp-code-copy-code-bg: #1b1836;
+  --vp-code-block-bg: #1c1d20;
+  --vp-code-copy-code-bg: #1c1d20;
 
   --vp-button-brand-bg: var(--lf-ember);
   --vp-button-brand-hover-bg: #ff9d5c;
   --vp-button-brand-active-bg: #ffb07a;
-  --vp-button-brand-text: var(--lf-night);
+  --vp-button-brand-text: var(--lf-bg-dark);
 
-  --vp-home-hero-name-color: #ece8fa;
+  --vp-home-hero-name-color: #ededee;
 }
 
 /* Type: linear text, a touch of casual in headings, mono for code */
@@ -129,9 +128,9 @@ kbd {
   text-align: center;
 }
 
-/* Code blocks sit on the night sky in both modes, like a terminal */
+/* Code blocks stay dark in both modes, like a terminal */
 .vp-doc div[class*='language-'] {
-  border: 1px solid var(--lf-dusk-line);
+  border: 1px solid var(--lf-line-dark);
 }
 
 :root:not(.dark) .vp-doc div[class*='language-'] {
@@ -140,11 +139,11 @@ kbd {
 }
 
 :root:not(.dark) .vp-doc div[class*='language-'] span.lang {
-  color: var(--lf-ash-dim);
+  color: var(--lf-text-dark-dim);
 }
 
 :root:not(.dark) .vp-doc div[class*='language-'] code {
-  color: var(--lf-ash);
+  color: var(--lf-text-dark);
 }
 
 /* Shiki light theme output is unreadable on the dark block, use its dark colors */

@@ -205,16 +205,16 @@ const comparison: [string, string, string][] = [
   display: flex;
   align-items: stretch;
   max-width: 100%;
-  border: 1px solid var(--lf-dusk-line);
+  border: 1px solid var(--lf-line-dark);
   border-radius: 10px;
-  background: var(--lf-dusk);
+  background: var(--lf-surface-dark);
   overflow: hidden;
 }
 
 .install-cmd {
   padding: 11px 14px;
   background: none;
-  color: var(--lf-ash);
+  color: var(--lf-text-dark);
   font-size: 0.92rem;
   white-space: nowrap;
   overflow-x: auto;
@@ -227,7 +227,7 @@ const comparison: [string, string, string][] = [
 
 .install-copy {
   padding: 0 16px;
-  border-left: 1px solid var(--lf-dusk-line);
+  border-left: 1px solid var(--lf-line-dark);
   color: var(--lf-flame);
   font-size: 0.9rem;
   font-weight: 600;

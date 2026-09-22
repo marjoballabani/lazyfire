@@ -1,12 +1,25 @@
 # Configuration
 
-LazyFire can be configured via a YAML configuration file.
+LazyFire works without a config file. To change colors, icons or emulator settings, create a YAML file with just the settings you want to change. Everything you leave out keeps its [default](#default-values).
 
 ## Config File Location
 
-LazyFire searches for `config.yaml` in:
-1. `~/.lazyfire/config.yaml` (recommended)
-2. `./config.yaml` (current directory)
+LazyFire uses the first file it finds:
+
+1. The file in the `LAZYFIRE_CONFIG_FILE` environment variable
+2. `~/.config/lazyfire/config.yml` (recommended), or `$XDG_CONFIG_HOME/lazyfire/config.yml` if that variable is set
+3. `~/.lazyfire/config.yaml`
+4. `config.yaml` in the directory you start LazyFire from
+
+Both `.yml` and `.yaml` work. If `LAZYFIRE_CONFIG_FILE` points to a file that doesn't exist or isn't valid YAML, LazyFire stops with an error instead of silently using the defaults.
+
+```bash
+mkdir -p ~/.config/lazyfire
+curl -o ~/.config/lazyfire/config.yml \
+  https://raw.githubusercontent.com/marjoballabani/lazyfire/main/config.example.yaml
+```
+
+The [example config](https://github.com/marjoballabani/lazyfire/blob/main/config.example.yaml) lists every setting with its default value.
 
 ## Configuration Options
 

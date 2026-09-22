@@ -4,7 +4,7 @@ LazyFire can connect to a local Firebase Emulator instead of production Firestor
 
 ## Configuration
 
-Add an `emulator` section to your `~/.lazyfire/config.yaml`:
+Add an `emulator` section to your config file (`~/.config/lazyfire/config.yml`, see [Configuration](/guide/configuration)):
 
 ```yaml
 emulator:

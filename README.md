@@ -159,7 +159,7 @@ Query results appear in the tree panel. For subcollection queries, results appea
 
 ## Configuration
 
-Create `~/.lazyfire/config.yaml`:
+LazyFire works without a config file. To change something, create `~/.config/lazyfire/config.yml` with only the settings you want to change; everything else keeps its default. `~/.lazyfire/config.yaml` and `./config.yaml` still work, and `LAZYFIRE_CONFIG_FILE` can point to any other file. [`config.example.yaml`](config.example.yaml) lists every setting with its default.
 
 ```yaml
 ui:
